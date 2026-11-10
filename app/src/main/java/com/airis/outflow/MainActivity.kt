@@ -28,7 +28,7 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private enum class Screen { LANGUAGE, NAME, MENU, LEVELS, GAME, SETTINGS, STATS, SHOP, PROFILE }
+    private enum class Screen { LANGUAGE, NAME, MENU, LEVELS, GAME, SETTINGS, STATS, SHOP, SHOP_SECTION, PROFILE, TROPHIES }
 
     private lateinit var store: Store
     private lateinit var sounds: Sounds
@@ -312,11 +312,17 @@ class MainActivity : Activity() {
             col.addFull(button(S.f("gift", gift), primary = true, fill = Palette.ACCENT) {
                 val got = store.claimGift()
                 if (got > 0) Toast.makeText(this, S.f("gift_got", got, store.giftStreakNext()), Toast.LENGTH_LONG).show()
+                checkTrophies()
                 showMenu()
             }, 24f)
         }
+        val today = Daily.today()
+        val best = store.dailyBest(today)
+        col.addFull(button(
+            if (best > 0) S.f("daily_done_btn", fmtTime(best)) else S.f("daily_btn", Daily.dateLabel(today)),
+            primary = true, fill = Palette.BOSS) { showGame(Daily.level(today)) }, if (gift > 0) 12f else 24f)
         val next = nextLevelId()
-        col.addFull(button(S.f("continue_lv", next), primary = true) { startLevel(next) }, if (gift > 0) 12f else 32f)
+        col.addFull(button(S.f("continue_lv", next), primary = true) { startLevel(next) }, 12f)
         col.addFull(button(S.t("levels")) { showLevels() }, 12f)
         col.addPair(
             button(S.t("shop")) { showShop() },
@@ -388,6 +394,7 @@ class MainActivity : Activity() {
     }
 
     private fun showBossIntro(lv: Level) {
+        playingDaily = false
         val col = column().apply { gravity = Gravity.CENTER; setPadding(dp(32f), 0, dp(32f), 0) }
         col.addWrap(text(S.t("boss"), 15f, bold = true, color = Color.WHITE).apply {
             background = rounded(Palette.BOSS, 20f)
@@ -480,17 +487,30 @@ class MainActivity : Activity() {
         return if (n > 0) S.f("free_n", n) else "● $cost"
     }
 
+    private fun isDaily(lv: Level) = lv.id == Daily.LEVEL_ID
+    private var playingDaily = false
+
+    /** Rigioca lo stesso livello (anche la sfida del giorno). */
+    private fun replay(lv: Level) = showGame(lv)
+
     private fun showGame(lv: Level) {
         stopTimer()
         val id = lv.id
         val frame = FrameLayout(this)
         val col = column()
         val heartsLabel = text("", 20f)
-        val title = if (lv.boss) "${S.f("level", id)} · ${S.t("boss")}" else S.f("level", id)
-        col.addFull(topBar(title, { showLevels() }, heartsLabel), 0f)
+        val daily = isDaily(lv)
+        playingDaily = daily
+        val title = when {
+            daily -> S.t("daily")
+            lv.boss -> "${S.f("level", id)} · ${S.t("boss")}"
+            else -> S.f("level", id)
+        }
+        col.addFull(topBar(title, { if (daily) showMenu() else showLevels() }, heartsLabel), 0f)
 
         val timeLabel = text("", 24f, bold = true, color = Palette.BOSS)
-        if (lv.time > 0) col.addWrap(timeLabel, 0f)
+        if (lv.time > 0 || daily) col.addWrap(timeLabel, 0f)
+        if (daily) timeLabel.setTextColor(Palette.PRIMARY)
 
         val tutorial = when (id) {
             1 -> S.t("tut1")
@@ -538,7 +558,7 @@ class MainActivity : Activity() {
         }
 
         val restart = smallButton(S.t("restart")) {
-            showGame(lv) // ricomincia da capo, timer compreso
+            replay(lv) // ricomincia da capo, timer compreso
         }
         hintBtn = smallButton("") {
             val stock = store.count(Item.HINTS) > 0
@@ -588,7 +608,7 @@ class MainActivity : Activity() {
                     startTimer()
                 },
                 onGiveUp = {
-                    store.recordPlay(id, false, SystemClock.elapsedRealtime() - startedAt, game.errors, extras)
+                    if (!daily) store.recordPlay(id, false, SystemClock.elapsedRealtime() - startedAt, game.errors, extras)
                 })
         }
 
@@ -606,9 +626,16 @@ class MainActivity : Activity() {
                 stopTimer()
                 sounds.win()
                 val ms = SystemClock.elapsedRealtime() - startedAt
+                if (daily) {
+                    showDailyResult(frame, lv, ms, game.errors, extras)
+                    return
+                }
                 store.recordPlay(id, true, ms, game.errors, extras)
-                if (lv.boss) store.recordBossTime(id, ms)
-                showResult(frame, lv, game.errors, extras)
+                if (lv.boss) {
+                    store.recordBossTime(id, ms)
+                    if (ms <= lv.time * 500L) store.fastBoss = true
+                }
+                showResult(frame, lv, game.errors, extras, ms)
             }
             override fun onLose() = lost(false)
         }
@@ -624,6 +651,18 @@ class MainActivity : Activity() {
             startTimer()
         }
         startedAt = SystemClock.elapsedRealtime()
+
+        // sfida del giorno: cronometro che conta in avanti
+        if (daily) {
+            val tick = object : Runnable {
+                override fun run() {
+                    if (screen != Screen.GAME || !timeLabel.isAttachedToWindow || game.attempts <= 0) return
+                    timeLabel.text = "⏱ ${fmtTime(SystemClock.elapsedRealtime() - startedAt)}"
+                    handler.postDelayed(this, 250)
+                }
+            }
+            handler.post(tick)
+        }
     }
 
     private fun overlay(frame: FrameLayout, build: (LinearLayout, () -> Unit) -> Unit) {
@@ -642,9 +681,35 @@ class MainActivity : Activity() {
         frame.addView(shade, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
-    private fun showResult(frame: FrameLayout, lv: Level, errors: Int, extras: Int) {
+    private fun showDailyResult(frame: FrameLayout, lv: Level, ms: Long, errors: Int, extras: Int) {
+        val day = Daily.today()
+        val prev = store.dailyBest(day)
+        val reward = store.recordDaily(day, ms)
+        checkTrophies()
+        val stars = Rules.starsFor(errors, extras)
+        overlay(frame) { card, _ ->
+            card.addWrap(text(S.t("daily_win"), 26f, bold = true, color = Palette.PRIMARY), 0f)
+            card.addWrap(text(starsText(stars), 40f, color = Palette.STAR), 8f)
+            card.addWrap(text(S.f("daily_time", fmtTime(ms)), 22f, bold = true), 4f)
+            val note = when {
+                prev == 0L -> S.f("earned", reward)
+                ms < prev -> S.t("daily_new")
+                else -> S.f("daily_best", fmtTime(prev))
+            }
+            card.addWrap(text(note, 15f, bold = true, color = Palette.PRIMARY), 6f)
+            card.addFull(button(S.t("share"), primary = true, fill = Palette.ACCENT) {
+                ShareCard.share(this, S.t("daily"), Daily.dateLabel(day), stars, fmtTime(ms), store.playerName)
+            }, 22f)
+            card.addPair(
+                button(S.t("retry")) { replay(lv) },
+                button(S.t("back")) { showMenu() }, 12f)
+        }
+    }
+
+    private fun showResult(frame: FrameLayout, lv: Level, errors: Int, extras: Int, ms: Long) {
         val stars = Rules.starsFor(errors, extras)
         val earned = store.recordResult(lv, stars)
+        checkTrophies()
         val hasNext = levels.any { it.id == lv.id + 1 }
         overlay(frame) { card, _ ->
             val name = store.playerName
@@ -667,6 +732,10 @@ class MainActivity : Activity() {
             card.addPair(
                 button(S.t("retry")) { showGame(lv) },
                 button(S.t("levels")) { showLevels() }, 12f)
+            card.addFull(button("↗ " + S.t("share")) {
+                ShareCard.share(this, S.f("level", lv.id), if (lv.boss) S.t("boss_title") else "", stars,
+                    if (lv.boss) fmtTime(ms) else null, store.playerName)
+            }, 12f)
         }
     }
 
@@ -699,8 +768,8 @@ class MainActivity : Activity() {
                 if (canPay || stock > 0) S.t("extra_note") else "${S.t("no_coins")} · ● ${store.coins}",
                 12f, color = Palette.QUIET), 6f)
             card.addPair(
-                button(S.t("retry")) { onGiveUp(); showGame(lv) },
-                button(S.t("levels")) { onGiveUp(); showLevels() }, 16f)
+                button(S.t("retry")) { onGiveUp(); replay(lv) },
+                button(S.t(if (isDaily(lv)) "back" else "levels")) { onGiveUp(); if (isDaily(lv)) showMenu() else showLevels() }, 16f)
         }
     }
 
@@ -716,18 +785,54 @@ class MainActivity : Activity() {
         return sb
     }
 
+    private val shopSections = listOf(
+        Triple("shop_items", "sec_items_sub", Palette::PRIMARY),
+        Triple("shop_themes", "sec_themes_sub", Palette::ACCENT),
+        Triple("shop_styles", "sec_styles_sub", Palette::PRIMARY),
+        Triple("shop_trails", "sec_trails_sub", Palette::ACCENT),
+    )
+
+    /** Negozio: quattro riquadri, Potenziamenti in cima. */
     private fun showShop() {
         val outer = column()
         val coins = text("● ${store.coins}", 16f, bold = true, color = Palette.INK)
         outer.addFull(topBar(S.t("shop"), { showMenu() }, coins), 0f)
+        val col = column().apply { setPadding(dp(18f), dp(8f), dp(18f), dp(28f)) }
+        val icons = listOf("✦", "◐", "➚", "✧")
+        for ((i, sec) in shopSections.withIndex()) {
+            val (titleKey, subKey, color) = sec
+            val c = color.get()
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = RippleDrawable(ColorStateList.valueOf(0x22000000),
+                    rounded(Palette.tint(c, 0.12f), 20f, c, 2f), null)
+                setPadding(dp(18f), dp(22f), dp(18f), dp(22f))
+                setOnClickListener { sounds.tap(); showShopSection(i) }
+            }
+            row.addView(text(icons[i], 34f, bold = true, color = c).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(56f), ViewGroup.LayoutParams.WRAP_CONTENT)
+            })
+            val info = column().apply { gravity = Gravity.START }
+            info.addFull(text(S.t(titleKey), 20f, bold = true).apply { gravity = Gravity.START }, 0f)
+            info.addFull(text(S.t(subKey), 13f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+            row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(text("›", 30f, color = c))
+            col.addFull(row, if (i == 0) 4f else 14f)
+        }
+        val scroll = ScrollView(this).apply { addView(col) }
+        outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setScreen(Screen.SHOP, outer)
+    }
+
+    private fun showShopSection(sec: Int) {
+        val outer = column()
+        val coins = text("● ${store.coins}", 16f, bold = true, color = Palette.INK)
+        outer.addFull(topBar(S.t(shopSections[sec].first), { showShop() }, coins), 0f)
         val col = column().apply { setPadding(dp(18f), dp(4f), dp(18f), dp(28f)) }
 
-        fun section(key: String, top: Float) =
-            col.addFull(text(S.t(key), 18f, bold = true).apply { gravity = Gravity.START }, top)
-
-        section("shop_themes", 4f)
         val current = store.themeId
-        for (t in Themes.all) {
+        if (sec == 1) for (t in Themes.all) {
             val has = store.hasTheme(t)
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -746,13 +851,14 @@ class MainActivity : Activity() {
                     store.themeId = t.id
                     Palette.apply(t)
                     setupSystemBars()
-                    showShop()
+                    showShopSection(sec)
                 }
                 t.unlockLevel > 0 -> text(S.f("unlock_at", t.unlockLevel), 12f, color = t.quiet)
                 else -> smallButton(S.f("buy", t.price), primary = store.coins >= t.price, fill = t.primary) {
                     if (store.buyTheme(t)) {
                         Toast.makeText(this, S.t("bought"), Toast.LENGTH_SHORT).show()
-                        showShop()
+                        checkTrophies()
+                        showShopSection(sec)
                     } else Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
                 }
             }
@@ -760,8 +866,7 @@ class MainActivity : Activity() {
             col.addFull(row, 10f)
         }
 
-        section("shop_items", 26f)
-        val items = listOf(
+        val items = if (sec != 0) emptyList() else listOf(
             Triple(Item.HINTS, "item_hint", "item_hint_sub"),
             Triple(Item.ATTEMPT, "item_attempt", "item_attempt_sub"),
             Triple(Item.TIME, "item_time", "item_time_sub"),
@@ -782,7 +887,8 @@ class MainActivity : Activity() {
             row.addView(smallButton(S.f("buy", item.price), primary = store.coins >= item.price) {
                 if (store.buyItem(item)) {
                     Toast.makeText(this, S.t("bought"), Toast.LENGTH_SHORT).show()
-                    showShop()
+                        checkTrophies()
+                    showShopSection(sec)
                 } else Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             col.addFull(row, 10f)
@@ -815,11 +921,12 @@ class MainActivity : Activity() {
             row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             val action: View = when {
                 inUse -> text(S.t("in_use"), 14f, bold = true, color = Palette.PRIMARY)
-                owned -> smallButton(S.t("use"), primary = true) { onUse(); showShop() }
+                owned -> smallButton(S.t("use"), primary = true) { onUse(); showShopSection(sec) }
                 else -> smallButton(S.f("buy", price), primary = store.coins >= price) {
                     if (onBuy()) {
                         Toast.makeText(this, S.t("bought"), Toast.LENGTH_SHORT).show()
-                        showShop()
+                        checkTrophies()
+                        showShopSection(sec)
                     } else Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
                 }
             }
@@ -829,22 +936,20 @@ class MainActivity : Activity() {
 
         val curStyle = ArrowStyle.byId(store.styleId)
         val curTrail = Trail.byId(store.trailId)
-        section("shop_styles", 26f)
-        col.addFull(text(S.t("tap_preview"), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
-        for (st in ArrowStyle.entries) {
+        if (sec == 2) col.addFull(text(S.t("tap_preview"), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+        if (sec == 2) for (st in ArrowStyle.entries) {
             cosmeticRow(st.label, st.desc, store.hasStyle(st), st == curStyle, st.price, preview(st, Trail.NONE),
                 onUse = { store.styleId = st.id }, onBuy = { store.buyStyle(st) })
         }
-        section("shop_trails", 26f)
-        col.addFull(text(S.t("tap_preview"), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
-        for (tr in Trail.entries) {
+        if (sec == 3) col.addFull(text(S.t("tap_preview"), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+        if (sec == 3) for (tr in Trail.entries) {
             cosmeticRow(tr.label, tr.desc, store.hasTrail(tr), tr == curTrail, tr.price, preview(curStyle, tr),
                 onUse = { store.trailId = tr.id }, onBuy = { store.buyTrail(tr) })
         }
 
         val scroll = ScrollView(this).apply { addView(col) }
         outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        setScreen(Screen.SHOP, outer)
+        setScreen(Screen.SHOP_SECTION, outer)
     }
 
     // ------------------------------------------------------------ impostazioni
@@ -916,6 +1021,67 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ------------------------------------------------------------ trofei
+    private fun trophyDone(t: Trophy): Boolean {
+        val completed = levels.count { store.stars(it.id) > 0 }
+        return when (t) {
+            Trophy.FIRST_WIN -> completed >= 1
+            Trophy.TEN_LEVELS -> completed >= 10
+            Trophy.FIFTY_LEVELS -> completed >= 50
+            Trophy.ALL_LEVELS -> completed >= levels.size
+            Trophy.FIRST_BOSS -> levels.count { it.boss && store.stars(it.id) > 0 } >= 1
+            Trophy.FIVE_BOSSES -> levels.count { it.boss && store.stars(it.id) > 0 } >= 5
+            Trophy.FAST_BOSS -> store.fastBoss
+            Trophy.PERFECT_10 -> levels.count { store.stars(it.id) == 3 } >= 10
+            Trophy.ARROWS_1K -> store.arrowsFreed >= 1000
+            Trophy.ARROWS_10K -> store.arrowsFreed >= 10000
+            Trophy.STREAK_7 -> store.giftStreak() >= 7
+            Trophy.DAILY_1 -> store.dailyDone >= 1
+            Trophy.DAILY_7 -> store.dailyDone >= 7
+            Trophy.SHOPPER -> store.purchases >= 1
+        }
+    }
+
+    /** Sblocca i trofei raggiunti e avvisa con un messaggio. */
+    private fun checkTrophies() {
+        val newOnes = Trophy.entries.filter { !store.hasTrophy(it) && trophyDone(it) }
+        for (t in newOnes) store.unlockTrophy(t)
+        if (newOnes.isNotEmpty()) {
+            val msg = newOnes.joinToString("\n") { "🏆 " + S.f("trophy_got", it.title, it.reward) }
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showTrophies() {
+        val outer = column()
+        val got = Trophy.entries.count { store.hasTrophy(it) }
+        outer.addFull(topBar(S.t("trophies"), { showProfile() }, text("$got / ${Trophy.entries.size}", 15f, bold = true, color = Palette.QUIET)), 0f)
+        val col = column().apply { setPadding(dp(18f), dp(4f), dp(18f), dp(28f)) }
+        for (t in Trophy.entries) {
+            val has = store.hasTrophy(t)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(if (has) Palette.tint(Palette.STAR, 0.14f) else Palette.CARD, 16f,
+                    if (has) Palette.STAR else Palette.LINE, if (has) 2f else 1.5f)
+                setPadding(dp(14f), dp(12f), dp(14f), dp(12f))
+            }
+            row.addView(text(if (has) "🏆" else "🔒", 26f).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(44f), ViewGroup.LayoutParams.WRAP_CONTENT)
+                alpha = if (has) 1f else 0.5f
+            })
+            val info = column().apply { gravity = Gravity.START }
+            info.addFull(text(t.title, 16f, bold = true, color = if (has) Palette.INK else Palette.QUIET).apply { gravity = Gravity.START }, 0f)
+            info.addFull(text(t.goal, 13f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+            row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(text("● ${t.reward}", 14f, bold = true, color = if (has) Palette.PRIMARY else Palette.QUIET))
+            col.addFull(row, 10f)
+        }
+        val scroll = ScrollView(this).apply { addView(col) }
+        outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setScreen(Screen.TROPHIES, outer)
+    }
+
     // ------------------------------------------------------------ profilo
     private fun showProfile() {
         val outer = column()
@@ -964,6 +1130,10 @@ class MainActivity : Activity() {
         col.addFull(text(S.t("p_look"), 17f, bold = true).apply { gravity = Gravity.START }, 20f)
         col.addFull(text("${Themes.byId(store.themeId).name} · ${ArrowStyle.byId(store.styleId).label} · ${Trail.byId(store.trailId).label}",
             14f, color = Palette.QUIET).apply { gravity = Gravity.START }, 4f)
+
+        val got = Trophy.entries.count { store.hasTrophy(it) }
+        col.addFull(button("🏆 ${S.t("trophies")} · $got / ${Trophy.entries.size}", primary = true, fill = Palette.STAR) { showTrophies() }, 20f)
+        col.addFull(text(S.t("leaderboards_soon"), 12f, color = Palette.QUIET), 6f)
 
         col.addFull(text(S.t("p_boss_times"), 17f, bold = true).apply { gravity = Gravity.START }, 20f)
         var anyBoss = false
@@ -1048,9 +1218,11 @@ class MainActivity : Activity() {
     @Deprecated("Gestione semplice del tasto indietro")
     override fun onBackPressed() {
         when (screen) {
-            Screen.GAME -> showLevels()
+            Screen.GAME -> if (playingDaily) showMenu() else showLevels()
             Screen.STATS -> showSettings()
             Screen.LEVELS, Screen.SETTINGS, Screen.SHOP, Screen.PROFILE -> showMenu()
+            Screen.SHOP_SECTION -> showShop()
+            Screen.TROPHIES -> showProfile()
             Screen.NAME -> { store.nameAsked = true; showMenu() }
             Screen.MENU, Screen.LANGUAGE -> {
                 @Suppress("DEPRECATION")

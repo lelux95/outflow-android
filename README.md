@@ -18,6 +18,16 @@ ogni livello è verificato come risolvibile) e salvati in `app/src/main/assets/l
 python3 tools/generate_levels.py
 ```
 
+## Versione alpha 0.5.0
+
+- Negozio a sezioni: Potenziamenti, Temi, Frecce, Scie
+- Sfida del giorno: livello 11×15 generato dalla data (uguale su tutti i telefoni, `Daily.kt`),
+  cronometro, record del giorno, 50 monete alla prima vittoria del giorno
+- 14 trofei con premi in monete (schermata dal Profilo)
+- Condividi risultato: immagine con livello/sfida, stelle, tempo e nome (menu Condividi di Android)
+- Regole di backup: i progressi (`outflow_v4.xml`) vanno nel backup Google e nel passaggio a un nuovo telefono
+- Progressi conservati dalla 0.4.0 (livelli invariati)
+
 ## Versione alpha 0.4.0
 
 - Griglie piene al 100%: generatore "riempi e ripara" (copre tutta la griglia, poi gira o spezza

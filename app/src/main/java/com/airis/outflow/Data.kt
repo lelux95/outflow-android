@@ -48,6 +48,7 @@ object Rules {
     const val HINT_COST = 25
     const val EXTRA_BASE_COST = 30
     const val REVEAL_COST = 50
+    const val DAILY_REWARD = 50
     const val EXTRA_SECONDS = 15
 
     /** Regalo giornaliero: cresce se si gioca piu' giorni di fila (dal 7° giorno resta a 100). */
@@ -142,7 +143,7 @@ class Store(ctx: Context) {
     /** Compra un tema. Restituisce false se le monete non bastano. */
     fun buyTheme(t: Theme): Boolean {
         if (hasTheme(t) || t.unlockLevel > 0 || coins < t.price) return false
-        p.edit().putInt("coins", coins - t.price).putBoolean("owned_${t.id}", true).apply()
+        p.edit().putInt("coins", coins - t.price).putBoolean("owned_${t.id}", true).putInt("purchases", purchases + 1).apply()
         return true
     }
 
@@ -169,13 +170,13 @@ class Store(ctx: Context) {
 
     fun buyStyle(s: ArrowStyle): Boolean {
         if (hasStyle(s) || coins < s.price) return false
-        p.edit().putInt("coins", coins - s.price).putBoolean("own_style_${s.id}", true).apply()
+        p.edit().putInt("coins", coins - s.price).putBoolean("own_style_${s.id}", true).putInt("purchases", purchases + 1).apply()
         return true
     }
 
     fun buyTrail(t: Trail): Boolean {
         if (hasTrail(t) || coins < t.price) return false
-        p.edit().putInt("coins", coins - t.price).putBoolean("own_trail_${t.id}", true).apply()
+        p.edit().putInt("coins", coins - t.price).putBoolean("own_trail_${t.id}", true).putInt("purchases", purchases + 1).apply()
         return true
     }
 
@@ -197,6 +198,42 @@ class Store(ctx: Context) {
         return if (last >= today - 1) p.getInt("gift_streak", 0) else 0
     }
 
+    // ------------------------------------------------ sfida del giorno
+    fun dailyBest(day: Long): Long = p.getLong("daily_best_$day", 0)
+
+    /** Registra una sfida del giorno vinta. Restituisce le monete del premio (solo la prima volta nel giorno). */
+    fun recordDaily(day: Long, ms: Long): Int {
+        val best = dailyBest(day)
+        val first = best == 0L
+        val e = p.edit()
+        if (first || ms < best) e.putLong("daily_best_$day", ms)
+        if (first) {
+            e.putInt("daily_done", dailyDone + 1)
+            e.putInt("coins", coins + Rules.DAILY_REWARD)
+        }
+        e.apply()
+        return if (first) Rules.DAILY_REWARD else 0
+    }
+
+    val dailyDone: Int get() = p.getInt("daily_done", 0)
+
+    // ------------------------------------------------ trofei e acquisti
+    fun hasTrophy(t: Trophy) = p.getBoolean("trophy_${t.id}", false)
+
+    fun unlockTrophy(t: Trophy): Boolean {
+        if (hasTrophy(t)) return false
+        p.edit().putBoolean("trophy_${t.id}", true).putInt("coins", coins + t.reward).apply()
+        return true
+    }
+
+    var purchases: Int
+        get() = p.getInt("purchases", 0)
+        set(v) { p.edit().putInt("purchases", v).apply() }
+
+    var fastBoss: Boolean
+        get() = p.getBoolean("fast_boss", false)
+        set(v) { p.edit().putBoolean("fast_boss", v).apply() }
+
     fun count(item: Item): Int = p.getInt("inv_${item.key}", 0)
 
     fun addItem(item: Item, n: Int) {
@@ -212,7 +249,7 @@ class Store(ctx: Context) {
 
     fun buyItem(item: Item): Boolean {
         if (coins < item.price) return false
-        p.edit().putInt("coins", coins - item.price).putInt("inv_${item.key}", count(item) + item.qty).apply()
+        p.edit().putInt("coins", coins - item.price).putInt("inv_${item.key}", count(item) + item.qty).putInt("purchases", purchases + 1).apply()
         return true
     }
 
