@@ -17,6 +17,7 @@ import json
 import math
 import os
 import random
+import sys
 
 DIRS = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # 0 su, 1 destra, 2 giu', 3 sinistra
 LEVEL_COUNT = 100
@@ -83,13 +84,15 @@ def head_dir(cells, d):
 
 
 class Params:
-    def __init__(self, max_len, turn_p, zigzag, min_len=1, greed=1, hot=0.7):
+    def __init__(self, max_len, turn_p, zigzag, min_len=1, greed=1, hot=0.7, edge_short=2, fill_min=1):
         self.max_len = max_len      # lunghezza massima delle frecce
         self.turn_p = turn_p        # probabilita' di curvare a ogni passo
         self.zigzag = zigzag        # ammesse piu' curve (zig-zag, S)
         self.min_len = min_len
         self.greed = greed          # quante proposte confrontare a ogni passo (piu' alto = piu' incastri)
         self.hot = hot              # probabilita' di partire sulla traiettoria di un'altra freccia
+        self.edge_short = edge_short  # frecce lunghe fino a questo valore non possono puntare fuori dal bordo
+        self.fill_min = fill_min    # lunghezza minima nel riempimento finale
 
 
 def generate(mask, w, h, p, rng):
@@ -135,7 +138,7 @@ def generate(mask, w, h, p, rng):
         return cells, steps
 
     def propose(start, min_len):
-        target = rng.randint(max(min_len, (p.max_len + 1) // 2), p.max_len)
+        target = rng.randint(min_len, p.max_len)
         cells, steps = walk(start, target)
         for n in range(len(cells), 0, -1):
             if n < min_len:
@@ -147,35 +150,59 @@ def generate(mask, w, h, p, rng):
             else:
                 options = sorted(range(4), key=lambda dd: -sum(1 for c in ray(part[-1], dd, w, h) if c in mask) - rng.random())
             for d in options:
+                hx, hy = part[-1]
+                nx, ny = hx + DIRS[d][0], hy + DIRS[d][1]
+                on_edge_out = not (0 <= nx < w and 0 <= ny < h)
+                if on_edge_out and n <= p.edge_short:
+                    continue  # freccia corta sul bordo verso l'esterno: troppo facile
                 if ray_clear(part[-1], d, own):
                     return part, d
         return None
+
+    unblocked = set()   # frecce la cui strada e' ancora tutta vuota
+    watch = {}          # cella -> frecce non bloccate la cui strada passa di li'
 
     def place(part, d):
         idx = len(arrows)
         arrows.append((part, d))
         for c in part:
             occ[c] = idx
+            for j in watch.pop(c, ()):
+                unblocked.discard(j)
+        cells_ahead = [c for c in ray(part[-1], d, w, h) if c in mask and c not in occ]
         for c in ray(part[-1], d, w, h):
             ray_owner[c] = ray_owner.get(c, 0) + 1
+        if cells_ahead:
+            unblocked.add(idx)
+            for c in cells_ahead:
+                watch.setdefault(c, set()).add(idx)
+
+    def gain(part):
+        hit = set()
+        for c in part:
+            for j in watch.get(c, ()):
+                if j in unblocked:
+                    hit.add(j)
+        return len(hit)
 
     misses = 0
-    while misses < 6:
+    while misses < 8:
         empty = [c for c in mask if c not in occ]
         if not empty:
             break
         best, best_score = None, None
+        hot = [c for c in empty if watch.get(c)]
         for _ in range(p.greed):
-            # partenza preferita sulle traiettorie altrui (per bloccarle)
-            hot = [c for c in empty if ray_owner.get(c)]
+            # partenza preferita sulla strada di una freccia ancora libera (per bloccarla)
             start = rng.choice(hot) if hot and rng.random() < p.hot else rng.choice(empty)
             prop = propose(start, p.min_len)
             if prop is None:
                 continue
             part, d = prop
-            blocks = sum(ray_owner.get(c, 0) for c in part)
-            reach = sum(1 for c in ray(part[-1], d, w, h) if c in mask)  # strada dentro la figura
-            sc = blocks * 2 + reach * 0.8 + len(part) * 0.4 + rng.random()
+            reach = sum(1 for c in ray(part[-1], d, w, h) if c in mask and c not in occ)
+            if reach == 0 and len(arrows) > 2:
+                continue  # resterebbe libera per sempre
+            sc = gain(part) * 5 + min(reach, 6) * 0.6 + len(part) * 0.3 + rng.random()
             if best is None or sc > best_score:
                 best, best_score = prop, sc
         if best is None:
@@ -184,11 +211,12 @@ def generate(mask, w, h, p, rng):
         misses = 0
         place(*best)
     # riempie i buchi rimasti con frecce piu' corte
-    for c in sorted(mask, key=lambda _: rng.random()):
-        if c not in occ:
-            prop = propose(c, 1)
-            if prop:
-                place(*prop)
+    for _ in range(2):
+        for c in sorted(mask, key=lambda _: rng.random()):
+            if c not in occ:
+                prop = propose(c, p.fill_min)
+                if prop:
+                    place(*prop)
     return arrows
 
 
@@ -236,64 +264,113 @@ SHAPES_MID = ["square", "circle", "heart", "hourglass", "diamond", "triangle", "
 SHAPES_LATE = ["square", "circle", "heart", "star", "ring", "hourglass", "triangle", "house", "cross", "arrow", "diamond", "plus"]
 
 
+def lerp(a, b, t):
+    return a + (b - a) * max(0.0, min(1.0, t))
+
+
 def plan_for(lid):
-    """Dimensione, forme e parametri delle frecce per il livello lid."""
+    """Griglia, parametri delle frecce e quota massima di frecce libere in partenza."""
     boss = lid % 10 == 0
-    if lid <= 3:
-        size, shapes, prm = 4, ["square", "diamond", "circle"], Params(2, 0.0, False, 1, 1, 0.25)
+    if lid <= 2:
+        w, h = 6, 7
     elif lid <= 5:
-        size, shapes, prm = 5, SHAPES_EARLY, Params(2, 0.0, False, 1, 1, 0.5)
-    elif lid <= 15:
-        size, shapes, prm = 5 + (lid > 10), SHAPES_EARLY + ["heart"], Params(3, 0.35, False, 1, 3)
+        w, h = 7, 9
     elif lid <= 30:
-        size, shapes, prm = 6 + (lid > 22), SHAPES_MID, Params(4, 0.4, True, 1, 6)
-    elif lid <= 50:
-        size, shapes, prm = 7 + (lid > 40), SHAPES_MID, Params(5, 0.45, True, 2, 10)
-    elif lid <= 75:
-        size, shapes, prm = 8 + (lid > 62), SHAPES_LATE, Params(6, 0.5, True, 2, 14)
+        t = (lid - 6) / 24
+        w, h = round(lerp(8, 10, t)), round(lerp(10, 13, t))
+    elif lid <= 60:
+        t = (lid - 31) / 29
+        w, h = round(lerp(11, 12, t)), round(lerp(14, 16, t))
     else:
-        size, shapes, prm = 9 + (lid > 88), SHAPES_LATE, Params(7, 0.55, True, 2, 18)
+        t = (lid - 61) / 39
+        w, h = round(lerp(13, 14, t)), round(lerp(17, 18, t))
+
+    t = (lid - 1) / 99
+    max_len = round(lerp(3, 7, t ** 0.7))
+    min_len = 2 if lid < 30 else 3
+    turn_p = 0.0 if lid <= 3 else (0.3 if lid <= 10 else round(lerp(0.4, 0.6, t), 2))
+    zigzag = lid > 10
+    greed = round(lerp(4, 16, t ** 0.6))
+    hot = 0.4 if lid <= 3 else 0.75
+    fill_min = 1 if lid <= 5 else 2
+    # quota di frecce libere all'inizio: 50% al liv. 1, 25% al 30, 12% al 100
+    target = lerp(0.5, 0.25, (lid - 1) / 29) if lid <= 30 else lerp(0.25, 0.12, (lid - 30) / 70)
     if boss:
-        size += 1
-        prm = Params(prm.max_len + 2, min(0.7, prm.turn_p + 0.2), True, max(2, prm.min_len), prm.greed * 2 + 6)
-    return size, shapes, prm, boss
+        w, h = w + 1, h + 1
+        max_len += 2
+        min_len = max(3, min_len)
+        turn_p = min(0.7, turn_p + 0.15)
+        zigzag = True
+        greed += 6
+        fill_min = 2
+        target *= 0.6
+    prm = Params(max_len, turn_p, zigzag, min_len, greed, hot, edge_short=2 if lid > 3 else 1, fill_min=fill_min)
+    return w, h, prm, boss, target
+
+
+SHAPES = {
+    "early": ["square", "diamond", "circle", "plus"],
+    "mid": ["square", "circle", "heart", "hourglass", "diamond", "triangle", "plus", "arrow", "house"],
+    "late": ["square", "circle", "heart", "star", "ring", "hourglass", "triangle", "house", "cross", "arrow", "diamond", "plus"],
+}
+
+
+def shape_for(lid, boss):
+    if boss:
+        return ["square", "circle", "heart", "square", "diamond", "house", "star", "square", "circle", "ring"][lid // 10 - 1]
+    group = "early" if lid <= 10 else ("mid" if lid <= 45 else "late")
+    lst = SHAPES[group]
+    return lst[(lid * 7) % len(lst)]
 
 
 def build_levels(seed=20261110):
     rng = random.Random(seed)
     raw = []
     for lid in range(1, LEVEL_COUNT + 1):
-        size, shapes, prm, boss = plan_for(lid)
-        shape = "square" if boss and lid <= 20 else shapes[(lid * 7) % len(shapes)]
-        mask = shape_mask(shape, size, size)
+        w, h, prm, boss, target = plan_for(lid)
+        shape = shape_for(lid, boss)
+        mask = shape_mask(shape, w, h)
         cands = []
-        for _ in range(30):
-            arrows = generate(mask, size, size, prm, rng)
+        for _ in range(70 if boss else 45):
+            arrows = generate(mask, w, h, prm, rng)
             covered = sum(len(c) for c, _ in arrows)
-            if covered < len(mask) * 0.9:
+            if covered < len(mask) * 0.6:
                 continue
-            s = score(arrows, size, size, mask)
-            if s is None:
+            ok, waves, free = solve(arrows, w, h)
+            if not ok:
                 continue
-            cands.append((s, arrows))
+            share = free / len(arrows)
+            singles = sum(1 for c, _ in arrows if len(c) == 1) / len(arrows)
+            if lid > 5 and singles > 0.10:
+                continue
+            if lid <= 5 and singles > 0.35:
+                continue
+            # piu' vicino alla quota di libere, poi piu' ondate
+            cov = covered / len(mask)
+            key = (max(0.0, share - target) * 10 + abs(share - target) + (1 - cov) * 2 - min(waves, 20) * 0.04,)
+            cands.append((key, arrows, waves, share))
         if not cands:
             raise SystemExit(f"nessun candidato per il livello {lid}")
         cands.sort(key=lambda t: t[0])
-        # boss: i piu' difficili; normali: fascia media
-        pick = cands[-1] if boss else cands[int(len(cands) * rng.uniform(0.35, 0.75))]
-        s, arrows = pick
-        ok, waves, free = solve(arrows, size, size)
-        assert ok
-        raw.append({
-            "id": lid, "shape": shape, "w": size, "h": size, "boss": boss,
+        _, arrows, waves, share = cands[0]
+        n = len(arrows)
+        avg = sum(len(c) for c, _ in arrows) / n
+        diff = waves * 1.0 + (1 - share) * 4 + avg * 0.8
+        lv = {
+            "id": lid, "shape": shape, "w": w, "h": h, "boss": boss,
             "arrows": [{"c": [v for cell in cells for v in cell], "d": head_dir(cells, d)} for cells, d in arrows],
-            "difficulty": round(s, 2),
-        })
+            "difficulty": round(diff, 2),
+        }
+        if boss:
+            # tempo che cresce con i boss: 45 s al livello 10, 90 s al livello 100 (+5 s ogni boss)
+            lv["time"] = 45 + (lid // 10 - 1) * 5
+        raw.append(lv)
+        print(f"  generato {lid}", file=sys.stderr, end="\r")
     # ogni blocco di 10 (escluso il boss) in ordine di difficolta' crescente
     out = []
     for b in range(0, LEVEL_COUNT, 10):
         block = raw[b:b + 10]
-        normal = sorted([l for l in block if not l["boss"]], key=lambda l: (l["w"], l["difficulty"]))
+        normal = sorted([l for l in block if not l["boss"]], key=lambda l: (l["w"] * l["h"], l["difficulty"]))
         bosses = [l for l in block if l["boss"]]
         for lid, lv in zip(range(b + 1, b + 11), normal + bosses):
             lv["id"] = lid
@@ -319,13 +396,13 @@ def main():
     out = os.path.join(root, "app", "src", "main", "assets", "levels.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
-        json.dump({"version": 2, "levels": levels}, f, separators=(",", ":"))
+        json.dump({"version": 3, "levels": levels}, f, separators=(",", ":"))
     for lv in levels:
         lens = [len(a["c"]) // 2 for a in lv["arrows"]]
         cells = [([(a["c"][k], a["c"][k + 1]) for k in range(0, len(a["c"]), 2)], a["d"]) for a in lv["arrows"]]
         _, waves, free = solve(cells, lv["w"], lv["h"])
-        tag = " BOSS" if lv["boss"] else ""
-        print(f"{lv['id']:>3} {lv['shape']:<9} {lv['w']}x{lv['h']} frecce={len(lens):>2} "
+        tag = f" BOSS {lv['time']}s" if lv["boss"] else ""
+        print(f"{lv['id']:>3} {lv['shape']:<9} {lv['w']}x{lv['h']:<3} frecce={len(lens):>2} "
               f"lung.max={max(lens)} media={sum(lens)/len(lens):.1f} libere={free/len(lens):.0%} ondate={waves} diff={lv['difficulty']}{tag}")
     print("scritto", out, os.path.getsize(out), "byte")
 

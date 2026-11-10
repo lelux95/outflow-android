@@ -12,38 +12,15 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
+import android.view.ViewConfiguration
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
-
-/** Colori dello stile base: minimal caldo, frecce colorate. */
-object Palette {
-    const val BG = 0xFFFBF6EE.toInt()
-    const val CARD = 0xFFFFFFFF.toInt()
-    const val INK = 0xFF26323A.toInt()
-    const val QUIET = 0xFF8A8478.toInt()
-    const val LINE = 0xFFE9E1D3.toInt()
-    const val PRIMARY = 0xFF2A9D8F.toInt()
-    const val ACCENT = 0xFFE76F51.toInt()
-    const val ERROR = 0xFFD63B3B.toInt()
-    const val STAR = 0xFFE9A82E.toInt()
-    const val LOCKED = 0xFFD8D0C2.toInt()
-    const val BOSS = 0xFF7B5CC4.toInt()
-
-    val ARROWS = intArrayOf(
-        0xFF2A9D8F.toInt(), // verde acqua
-        0xFFE76F51.toInt(), // corallo
-        0xFF5B6CC9.toInt(), // indaco
-        0xFFE0A21E.toInt(), // senape
-        0xFFD9668F.toInt(), // rosa
-        0xFF4F9F5A.toInt(), // verde
-        0xFF8E6CC0.toInt(), // viola
-        0xFF3A94D0.toInt(), // azzurro
-    )
-}
 
 /** Il campo di gioco: disegna le frecce, gestisce i tocchi e le animazioni. */
 class GameView(context: Context) : View(context) {
@@ -82,9 +59,40 @@ class GameView(context: Context) : View(context) {
     private var hintIdx = -1
     private var hintStart = 0L
 
+    private var revealStart = 0L
+    private var revealSet = BooleanArray(0)
+
+    // geometria: "base" = griglia adattata allo schermo, poi zoom (z) e spostamento (pan)
+    private var baseCell = 0f
+    private var z = 1f
+    private var maxZ = 1f
+    private var panX = 0f
+    private var panY = 0f
     private var cell = 0f
     private var ox = 0f
     private var oy = 0f
+
+    private val slop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private var downX = 0f
+    private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var dragging = false
+    private var multi = false
+
+    private val scaler = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+        override fun onScale(d: ScaleGestureDetector): Boolean {
+            val nz = (z * d.scaleFactor).coerceIn(1f, maxZ)
+            val fx = d.focusX - width / 2f
+            val fy = d.focusY - height / 2f
+            panX = fx - (fx - panX) * nz / z
+            panY = fy - (fy - panY) * nz / z
+            z = nz
+            applyTransform()
+            invalidate()
+            return true
+        }
+    })
 
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -114,6 +122,9 @@ class GameView(context: Context) : View(context) {
         finished = false
         flying.clear()
         shakeIdx = -1; blockIdx = -1; hintIdx = -1
+        revealSet = BooleanArray(arrows.size)
+        revealStart = 0L
+        z = 1f; panX = 0f; panY = 0f
         relayout()
         invalidate()
     }
@@ -123,6 +134,33 @@ class GameView(context: Context) : View(context) {
         attempts += 1
         finished = false
         invalidate()
+    }
+
+    /** Ferma la partita (tempo scaduto). */
+    fun stop() {
+        finished = true
+    }
+
+    /** Riprende la partita dopo un aiuto acquistato (es. +15 secondi). */
+    fun resumeGame() {
+        finished = false
+        invalidate()
+    }
+
+    /** Mostra per un attimo tutte le frecce che si possono liberare ora. */
+    fun reveal(): Boolean {
+        val l = level ?: return false
+        if (finished) return false
+        var any = false
+        for (i in arrows.indices) {
+            revealSet[i] = alive[i] && blocker(i, l) < 0
+            if (revealSet[i]) any = true
+        }
+        if (any) {
+            revealStart = SystemClock.uptimeMillis()
+            invalidate()
+        }
+        return any
     }
 
     /** Evidenzia una freccia che si puo' liberare. Restituisce false se non serve. */
@@ -200,11 +238,26 @@ class GameView(context: Context) : View(context) {
     private fun relayout() {
         val l = level ?: return
         if (width == 0 || height == 0) return
-        val pad = 18f * resources.displayMetrics.density
-        val maxCell = 88f * resources.displayMetrics.density
-        cell = min(min((width - 2 * pad) / l.w, (height - 2 * pad) / l.h), maxCell)
-        ox = (width - cell * l.w) / 2f
-        oy = (height - cell * l.h) / 2f
+        val dens = resources.displayMetrics.density
+        val pad = 12f * dens
+        val maxCell = 80f * dens
+        baseCell = min(min((width - 2 * pad) / l.w, (height - 2 * pad) / l.h), maxCell)
+        // zoom fino a caselle di circa 64 dp (almeno x2)
+        maxZ = max(2f, 64f * dens / baseCell)
+        applyTransform()
+    }
+
+    private fun applyTransform() {
+        val l = level ?: return
+        cell = baseCell * z
+        val cw = cell * l.w
+        val ch = cell * l.h
+        val limX = max(0f, (cw - width) / 2f + cell)
+        val limY = max(0f, (ch - height) / 2f + cell)
+        panX = if (z <= 1f) 0f else panX.coerceIn(-limX, limX)
+        panY = if (z <= 1f) 0f else panY.coerceIn(-limY, limY)
+        ox = (width - cw) / 2f + panX
+        oy = (height - ch) / 2f + panY
         stroke.pathEffect = CornerPathEffect(cell * 0.32f)
         glow.pathEffect = CornerPathEffect(cell * 0.32f)
     }
@@ -224,20 +277,40 @@ class GameView(context: Context) : View(context) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        scaler.onTouchEvent(event)
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> return true
-            MotionEvent.ACTION_UP -> {
-                val l = level ?: return true
-                val cx = floor((event.x - ox) / cell).toInt()
-                val cy = floor((event.y - oy) / cell).toInt()
-                if (cx in 0 until l.w && cy in 0 until l.h) {
-                    val i = occ[cy * l.w + cx]
-                    if (i >= 0) tap(i, l)
+            MotionEvent.ACTION_DOWN -> {
+                downX = event.x; downY = event.y
+                lastX = event.x; lastY = event.y
+                dragging = false
+                multi = false
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> multi = true
+            MotionEvent.ACTION_MOVE -> {
+                if (!multi && event.pointerCount == 1) {
+                    if (!dragging && (abs(event.x - downX) > slop || abs(event.y - downY) > slop)) dragging = true
+                    if (dragging && z > 1f) {
+                        panX += event.x - lastX
+                        panY += event.y - lastY
+                        applyTransform()
+                        invalidate()
+                    }
                 }
-                return true
+                lastX = event.x; lastY = event.y
+            }
+            MotionEvent.ACTION_UP -> {
+                if (!dragging && !multi) {
+                    val l = level ?: return true
+                    val cx = floor((event.x - ox) / cell).toInt()
+                    val cy = floor((event.y - oy) / cell).toInt()
+                    if (cx in 0 until l.w && cy in 0 until l.h) {
+                        val i = occ[cy * l.w + cx]
+                        if (i >= 0) tap(i, l)
+                    }
+                }
             }
         }
-        return super.onTouchEvent(event)
+        return true
     }
 
     private fun tap(i: Int, l: Level) {
@@ -314,6 +387,14 @@ class GameView(context: Context) : View(context) {
                     animating = true
                 } else blockIdx = -1
             }
+            if (revealStart > 0 && revealSet[i]) {
+                val t = (now - revealStart) / 2200f
+                if (t < 1f) {
+                    val a = (110 * (1 - t) + 40 * sin(t * 2 * PI * 3)).toInt().coerceIn(0, 255)
+                    drawArrow(canvas, i, 0f, dx, colors[i], 1f, a)
+                    animating = true
+                }
+            }
             if (i == hintIdx) {
                 val t = (now - hintStart) / 1000f
                 val a = (90 + 70 * sin(t * 2 * PI * 1.1)).toInt().coerceIn(0, 255)
@@ -365,8 +446,8 @@ class GameView(context: Context) : View(context) {
         body.lineTo(hx, hy)
 
         val d = segDir(p, n, to - 0.001f, a.dir)
-        val len = cell * 0.36f
-        val half = cell * 0.24f
+        val len = cell * 0.32f
+        val half = cell * 0.21f
         tip.reset()
         tip.moveTo(hx + DX[d] * len, hy + DY[d] * len)
         tip.lineTo(hx - DY[d] * half, hy + DX[d] * half)
@@ -376,12 +457,12 @@ class GameView(context: Context) : View(context) {
         if (glowAlpha >= 0) {
             glow.color = color
             glow.alpha = glowAlpha
-            glow.strokeWidth = cell * 0.5f
+            glow.strokeWidth = cell * 0.46f
             c.drawPath(body, glow)
             return
         }
         stroke.color = color
-        stroke.strokeWidth = cell * 0.17f * widthMul
+        stroke.strokeWidth = cell * 0.12f * widthMul
         head.color = color
         c.drawPath(body, stroke)
         c.drawPath(tip, head)

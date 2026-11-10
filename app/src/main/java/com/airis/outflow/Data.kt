@@ -11,7 +11,8 @@ class Arrow(val xs: IntArray, val ys: IntArray, val dir: Int) {
     val headY: Int get() = ys[ys.size - 1]
 }
 
-class Level(val id: Int, val shape: String, val w: Int, val h: Int, val boss: Boolean, val arrows: List<Arrow>)
+/** time > 0 = livello a tempo (boss), in secondi. */
+class Level(val id: Int, val shape: String, val w: Int, val h: Int, val boss: Boolean, val time: Int, val arrows: List<Arrow>)
 
 object Levels {
     @Volatile private var cache: List<Level>? = null
@@ -34,7 +35,7 @@ object Levels {
                 arrows.add(Arrow(xs, ys, ao.getInt("d")))
             }
             list.add(Level(o.getInt("id"), o.getString("shape"), o.getInt("w"), o.getInt("h"),
-                o.optBoolean("boss", false), arrows))
+                o.optBoolean("boss", false), o.optInt("time", 0), arrows))
         }
         cache = list
         return list
@@ -46,6 +47,11 @@ object Rules {
     const val MAX_ATTEMPTS = 3
     const val HINT_COST = 25
     const val EXTRA_BASE_COST = 30
+    const val REVEAL_COST = 50
+    const val EXTRA_SECONDS = 15
+
+    /** Regalo giornaliero: cresce se si gioca piu' giorni di fila (dal 7° giorno resta a 100). */
+    fun dailyGift(streak: Int): Int = intArrayOf(20, 30, 40, 50, 60, 80, 100)[(streak - 1).coerceIn(0, 6)]
 
     /** 0 errori = 3 stelle, 1 = 2, 2 o piu' (o tentativi comprati) = 1. */
     fun starsFor(errors: Int, boughtExtra: Int): Int = when {
@@ -69,20 +75,32 @@ object Rules {
     fun extraCost(alreadyBought: Int): Int = EXTRA_BASE_COST shl alreadyBought
 }
 
+/** Oggetti del negozio (potenziamenti consumabili). */
+enum class Item(val key: String, val price: Int, val qty: Int) {
+    HINTS("hint", 60, 3),
+    ATTEMPT("attempt", 70, 1),
+    TIME("time", 80, 1),
+    REVEAL("reveal", 100, 2),
+}
+
 /** Statistiche di una partita, registrate per la modalita' Tester. */
 class PlayStat(val plays: Int, val wins: Int, val bestStars: Int, val lastMs: Long, val lastErrors: Int, val extrasBought: Int)
 
-/** Salvataggio locale. Il file "outflow_v2" riparte da zero rispetto all'alpha 0.1. */
+/** Salvataggio locale. "outflow_v3": livelli nuovi, si riparte da zero (restano lingua e impostazioni). */
 class Store(ctx: Context) {
-    private val p = ctx.getSharedPreferences("outflow_v2", Context.MODE_PRIVATE)
+    private val p = ctx.getSharedPreferences("outflow_v3", Context.MODE_PRIVATE)
 
     init {
         // porta con se' solo lingua e vibrazione dalla versione precedente
         if (!p.contains("migrated")) {
-            val old = ctx.getSharedPreferences("outflow", Context.MODE_PRIVATE)
             val e = p.edit().putBoolean("migrated", true)
-            old.getString("lang", null)?.let { e.putString("lang", it) }
-            if (old.contains("vibration")) e.putBoolean("vibration", old.getBoolean("vibration", true))
+            for (name in listOf("outflow_v2", "outflow")) {
+                val old = ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
+                val lang = old.getString("lang", null) ?: continue
+                e.putString("lang", lang)
+                for (k in listOf("vibration", "sound", "tester")) if (old.contains(k)) e.putBoolean(k, old.getBoolean(k, true))
+                break
+            }
             e.apply()
         }
     }
@@ -107,6 +125,67 @@ class Store(ctx: Context) {
     var tester: Boolean
         get() = BuildConfig.ALPHA && p.getBoolean("tester", false)
         set(v) { p.edit().putBoolean("tester", v).apply() }
+
+    var themeId: String
+        get() = p.getString("theme", "classic") ?: "classic"
+        set(v) { p.edit().putString("theme", v).apply() }
+
+    /** Un tema e' disponibile se incluso, comprato o sbloccato completando il suo livello. */
+    fun hasTheme(t: Theme): Boolean = when {
+        t.unlockLevel > 0 -> stars(t.unlockLevel) > 0
+        t.price == 0 -> true
+        else -> p.getBoolean("owned_${t.id}", false)
+    }
+
+    /** Compra un tema. Restituisce false se le monete non bastano. */
+    fun buyTheme(t: Theme): Boolean {
+        if (hasTheme(t) || t.unlockLevel > 0 || coins < t.price) return false
+        p.edit().putInt("coins", coins - t.price).putBoolean("owned_${t.id}", true).apply()
+        return true
+    }
+
+    fun count(item: Item): Int = p.getInt("inv_${item.key}", 0)
+
+    fun addItem(item: Item, n: Int) {
+        p.edit().putInt("inv_${item.key}", (count(item) + n).coerceAtLeast(0)).apply()
+    }
+
+    /** Usa un pezzo dalla scorta. Restituisce false se la scorta e' vuota. */
+    fun useItem(item: Item): Boolean {
+        if (count(item) <= 0) return false
+        addItem(item, -1)
+        return true
+    }
+
+    fun buyItem(item: Item): Boolean {
+        if (coins < item.price) return false
+        p.edit().putInt("coins", coins - item.price).putInt("inv_${item.key}", count(item) + item.qty).apply()
+        return true
+    }
+
+    private fun today(): Long = java.time.LocalDate.now().toEpochDay()
+
+    /** Monete del regalo di oggi, oppure 0 se e' gia' stato ritirato. */
+    fun giftAvailable(): Int {
+        val last = p.getLong("gift_day", -10)
+        if (last == today()) return 0
+        val streak = if (last == today() - 1) p.getInt("gift_streak", 0) + 1 else 1
+        return Rules.dailyGift(streak)
+    }
+
+    fun giftStreakNext(): Int {
+        val last = p.getLong("gift_day", -10)
+        return if (last == today() - 1) p.getInt("gift_streak", 0) + 1 else 1
+    }
+
+    /** Ritira il regalo di oggi. Restituisce le monete ricevute. */
+    fun claimGift(): Int {
+        val amount = giftAvailable()
+        if (amount == 0) return 0
+        val streak = giftStreakNext()
+        p.edit().putLong("gift_day", today()).putInt("gift_streak", streak).putInt("coins", coins + amount).apply()
+        return amount
+    }
 
     fun stars(id: Int): Int = p.getInt("stars_$id", 0)
 
@@ -145,6 +224,7 @@ class Store(ctx: Context) {
         val s = sound
         val t = p.getBoolean("tester", false)
         p.edit().clear().putBoolean("migrated", true).apply()
+        themeId = "classic"
         lang = l
         vibration = v
         sound = s

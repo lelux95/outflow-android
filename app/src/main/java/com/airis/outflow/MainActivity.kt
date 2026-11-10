@@ -28,7 +28,7 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private enum class Screen { LANGUAGE, MENU, LEVELS, GAME, SETTINGS, STATS }
+    private enum class Screen { LANGUAGE, MENU, LEVELS, GAME, SETTINGS, STATS, SHOP }
 
     private lateinit var store: Store
     private lateinit var sounds: Sounds
@@ -37,6 +37,14 @@ class MainActivity : Activity() {
     private var screen = Screen.MENU
     private var bg: BgArrowsView? = null
 
+    // timer dei boss
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var timerLeftMs = 0L
+    private var timerRunning = false
+    private var timerLast = 0L
+    private var timerTick: Runnable? = null
+    private var timerHold = false // fermo mentre e' aperta la schermata di livello perso
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = Store(this)
@@ -44,6 +52,7 @@ class MainActivity : Activity() {
         sounds.enabled = store.sound
         levels = Levels.all(this)
         S.lang = store.lang ?: "en"
+        Palette.apply(Themes.byId(store.themeId))
 
         root = FrameLayout(this).apply { setBackgroundColor(Palette.BG) }
         setContentView(root)
@@ -55,10 +64,12 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         bg?.resume()
+        if (timerTick != null && timerLeftMs > 0 && !timerHold) startTimer()
     }
 
     override fun onPause() {
         bg?.pause()
+        pauseTimer()
         super.onPause()
     }
 
@@ -74,12 +85,9 @@ class MainActivity : Activity() {
         window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= 30) {
             window.setDecorFitsSystemWindows(false)
-            window.insetsController?.setSystemBarsAppearance(
-                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
-                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                    WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            )
+            val light = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (Palette.DARK) 0 else light, light)
             root.setOnApplyWindowInsetsListener { v, insets ->
                 val b = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
                 v.setPadding(b.left, b.top, b.right, b.bottom)
@@ -88,7 +96,7 @@ class MainActivity : Activity() {
         } else {
             window.statusBarColor = Palette.BG
             window.navigationBarColor = Palette.BG
-            window.decorView.systemUiVisibility =
+            window.decorView.systemUiVisibility = if (Palette.DARK) 0 else
                 View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
         }
     }
@@ -166,6 +174,8 @@ class MainActivity : Activity() {
         screen = s
         bg?.pause()
         bg = null
+        if (s != Screen.GAME) stopTimer()
+        root.setBackgroundColor(Palette.BG)
         root.removeAllViews()
         root.addView(content, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
@@ -248,10 +258,18 @@ class MainActivity : Activity() {
         }
         col.addWrap(stats, 24f)
 
+        val gift = store.giftAvailable()
+        if (gift > 0) {
+            col.addFull(button(S.f("gift", gift), primary = true, fill = Palette.ACCENT) {
+                val got = store.claimGift()
+                if (got > 0) Toast.makeText(this, S.f("gift_got", got, store.giftStreakNext()), Toast.LENGTH_LONG).show()
+                showMenu()
+            }, 24f)
+        }
         val next = nextLevelId()
-        col.addFull(button(S.f("continue_lv", next), primary = true) { startLevel(next) }, 32f)
+        col.addFull(button(S.f("continue_lv", next), primary = true) { startLevel(next) }, if (gift > 0) 12f else 32f)
         col.addFull(button(S.t("levels")) { showLevels() }, 12f)
-        col.addFull(button(S.t("themes_soon"), enabled = false) {}, 12f)
+        col.addFull(button(S.t("shop")) { showShop() }, 12f)
         col.addFull(button(S.t("settings")) { showSettings() }, 12f)
         frame.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
@@ -273,8 +291,8 @@ class MainActivity : Activity() {
             val st = store.stars(lv.id)
             val cellBg = when {
                 !open -> rounded(Palette.BG, 14f, Palette.LOCKED)
-                lv.boss -> rounded(if (st > 0) 0xFFEDE6F8.toInt() else Palette.CARD, 14f, Palette.BOSS, 2.5f)
-                st > 0 -> rounded(0xFFE4F3F0.toInt(), 14f, Palette.PRIMARY, 1.5f)
+                lv.boss -> rounded(if (st > 0) Palette.tint(Palette.BOSS, 0.16f) else Palette.CARD, 14f, Palette.BOSS, 2.5f)
+                st > 0 -> rounded(Palette.tint(Palette.PRIMARY, 0.14f), 14f, Palette.PRIMARY, 1.5f)
                 else -> rounded(Palette.CARD, 14f, Palette.INK, 2f)
             }
             val cellCol = column().apply {
@@ -327,18 +345,101 @@ class MainActivity : Activity() {
         }, 0f)
         col.addWrap(text(S.t("boss_title"), 34f, bold = true, color = Palette.BOSS), 18f)
         col.addWrap(text(S.f("boss_sub", lv.id, lv.arrows.size), 16f, color = Palette.QUIET), 8f)
+        col.addWrap(text("⏱ ${fmtTime(lv.time * 1000L)}", 30f, bold = true, color = Palette.BOSS), 16f)
         col.addFull(button(S.t("start"), primary = true, fill = Palette.BOSS) { showGame(lv) }, 36f)
         col.addFull(button(S.t("levels")) { showLevels() }, 12f)
         setScreen(Screen.GAME, col)
     }
 
+    private fun fmtTime(ms: Long): String {
+        val secs = ((ms + 999) / 1000).coerceAtLeast(0)
+        return String.format("%d:%02d", secs / 60, secs % 60)
+    }
+
+    // ------------------------------------------------------------ timer dei boss
+    private var timerLabel: TextView? = null
+    private var onTimeUp: (() -> Unit)? = null
+
+    private fun startTimer() {
+        if (timerRunning || timerLeftMs <= 0) return
+        timerRunning = true
+        timerLast = SystemClock.elapsedRealtime()
+        val tick = timerTick ?: return
+        handler.post(tick)
+    }
+
+    private fun pauseTimer() {
+        if (!timerRunning) return
+        val now = SystemClock.elapsedRealtime()
+        timerLeftMs -= now - timerLast
+        timerRunning = false
+        timerTick?.let { handler.removeCallbacks(it) }
+    }
+
+    private fun stopTimer() {
+        timerRunning = false
+        timerTick?.let { handler.removeCallbacks(it) }
+        timerTick = null
+        timerLeftMs = 0
+        timerHold = false
+        timerLabel = null
+        onTimeUp = null
+    }
+
+    private fun setupTimer(seconds: Int, label: TextView, timeUp: () -> Unit) {
+        stopTimer()
+        timerLeftMs = seconds * 1000L
+        timerLabel = label
+        onTimeUp = timeUp
+        timerTick = object : Runnable {
+            override fun run() {
+                if (!timerRunning) return
+                val now = SystemClock.elapsedRealtime()
+                timerLeftMs -= now - timerLast
+                timerLast = now
+                if (timerLeftMs <= 0) {
+                    timerLeftMs = 0
+                    timerRunning = false
+                    updateTimerLabel()
+                    onTimeUp?.invoke()
+                    return
+                }
+                updateTimerLabel()
+                handler.postDelayed(this, 100)
+            }
+        }
+        updateTimerLabel()
+    }
+
+    private fun updateTimerLabel() {
+        val l = timerLabel ?: return
+        l.text = "⏱ ${fmtTime(timerLeftMs)}"
+        l.setTextColor(if (timerLeftMs <= 10_000) Palette.ERROR else Palette.BOSS)
+    }
+
+    // ------------------------------------------------------------ partita
+    private fun smallButton(label: String, primary: Boolean = false, fill: Int = Palette.PRIMARY, onClick: () -> Unit): TextView =
+        button(label, primary = primary, fill = fill, onClick = onClick).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(dp(8f), dp(13f), dp(8f), dp(13f))
+        }
+
+    private fun stockOrCost(item: Item, cost: Int): String {
+        val n = store.count(item)
+        return if (n > 0) S.f("free_n", n) else "● $cost"
+    }
+
     private fun showGame(lv: Level) {
+        stopTimer()
         val id = lv.id
         val frame = FrameLayout(this)
         val col = column()
         val heartsLabel = text("", 20f)
         val title = if (lv.boss) "${S.f("level", id)} · ${S.t("boss")}" else S.f("level", id)
         col.addFull(topBar(title, { showLevels() }, heartsLabel), 0f)
+
+        val timeLabel = text("", 24f, bold = true, color = Palette.BOSS)
+        if (lv.time > 0) col.addWrap(timeLabel, 0f)
 
         val tutorial = when (id) {
             1 -> S.t("tut1")
@@ -358,57 +459,102 @@ class MainActivity : Activity() {
 
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(16f), dp(8f), dp(16f), dp(16f))
+            setPadding(dp(12f), dp(8f), dp(12f), dp(16f))
         }
         var extras = 0
         var startedAt = SystemClock.elapsedRealtime()
-        val restart = button(S.t("restart")) {
-            game.setLevel(lv); extras = 0; startedAt = SystemClock.elapsedRealtime()
-            heartsLabel.text = hearts(game.attempts, Rules.MAX_ATTEMPTS)
+        lateinit var hintBtn: TextView
+        lateinit var revealBtn: TextView
+
+        fun refreshBar() {
+            coinsLabel.text = "● ${store.coins}"
+            hintBtn.text = S.f("hint_btn", stockOrCost(Item.HINTS, Rules.HINT_COST))
+            revealBtn.text = S.f("reveal", stockOrCost(Item.REVEAL, Rules.REVEAL_COST))
         }
-        val hint = button(S.f("hint", Rules.HINT_COST)) {
-            if (store.coins < Rules.HINT_COST) {
+
+        val restart = smallButton(S.t("restart")) {
+            showGame(lv) // ricomincia da capo, timer compreso
+        }
+        hintBtn = smallButton("") {
+            val stock = store.count(Item.HINTS) > 0
+            if (!stock && store.coins < Rules.HINT_COST) {
                 Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
             } else if (game.hint()) {
-                store.coins = store.coins - Rules.HINT_COST
-                coinsLabel.text = "● ${store.coins}"
+                if (!store.useItem(Item.HINTS)) store.coins = store.coins - Rules.HINT_COST
+                refreshBar()
             }
         }
-        bottom.addView(restart, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { rightMargin = dp(6f) })
-        bottom.addView(hint, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(6f) })
+        revealBtn = smallButton("") {
+            val stock = store.count(Item.REVEAL) > 0
+            if (!stock && store.coins < Rules.REVEAL_COST) {
+                Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
+            } else if (game.reveal()) {
+                if (!store.useItem(Item.REVEAL)) store.coins = store.coins - Rules.REVEAL_COST
+                refreshBar()
+            }
+        }
+        val lp = { l: Float, r: Float -> LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(l); rightMargin = dp(r) } }
+        bottom.addView(restart, lp(0f, 4f))
+        bottom.addView(hintBtn, lp(4f, 4f))
+        bottom.addView(revealBtn, lp(4f, 0f))
         col.addFull(bottom, 4f)
         frame.addView(col)
+        refreshBar()
+
+        fun totalHearts() = maxOf(Rules.MAX_ATTEMPTS, game.attempts)
+
+        val lost = { byTime: Boolean ->
+            sounds.lose()
+            pauseTimer()
+            timerHold = true
+            showLost(frame, lv, extras, byTime,
+                onContinue = {
+                    extras++
+                    if (byTime) {
+                        timerLeftMs += Rules.EXTRA_SECONDS * 1000L
+                        updateTimerLabel()
+                        game.resumeGame()
+                    } else {
+                        game.addAttempt()
+                    }
+                    heartsLabel.text = hearts(game.attempts, totalHearts())
+                    refreshBar()
+                    timerHold = false
+                    startTimer()
+                },
+                onGiveUp = {
+                    store.recordPlay(id, false, SystemClock.elapsedRealtime() - startedAt, game.errors, extras)
+                })
+        }
 
         game.listener = object : GameView.Listener {
             override fun onTap() {}
             override fun onArrowOut(remaining: Int) = sounds.out()
             override fun onMistake(attemptsLeft: Int) {
                 sounds.error()
-                heartsLabel.text = hearts(attemptsLeft.coerceAtLeast(0), Rules.MAX_ATTEMPTS + extras)
+                heartsLabel.text = hearts(attemptsLeft.coerceAtLeast(0), totalHearts())
             }
             override fun onWin() {
+                stopTimer()
                 sounds.win()
                 val ms = SystemClock.elapsedRealtime() - startedAt
                 store.recordPlay(id, true, ms, game.errors, extras)
                 showResult(frame, lv, game.errors, extras)
             }
-            override fun onLose() {
-                sounds.lose()
-                showLost(frame, lv, extras,
-                    onContinue = {
-                        extras++
-                        game.addAttempt()
-                        heartsLabel.text = hearts(game.attempts, Rules.MAX_ATTEMPTS + extras)
-                        coinsLabel.text = "● ${store.coins}"
-                    },
-                    onGiveUp = {
-                        store.recordPlay(id, false, SystemClock.elapsedRealtime() - startedAt, game.errors, extras)
-                    })
-            }
+            override fun onLose() = lost(false)
         }
         game.setLevel(lv)
         heartsLabel.text = hearts(game.attempts, Rules.MAX_ATTEMPTS)
         setScreen(Screen.GAME, frame)
+
+        if (lv.time > 0) {
+            setupTimer(lv.time, timeLabel) {
+                game.stop()
+                lost(true)
+            }
+            startTimer()
+        }
+        startedAt = SystemClock.elapsedRealtime()
     }
 
     private fun overlay(frame: FrameLayout, build: (LinearLayout, () -> Unit) -> Unit) {
@@ -449,25 +595,128 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun showLost(frame: FrameLayout, lv: Level, extrasSoFar: Int, onContinue: () -> Unit, onGiveUp: () -> Unit) {
+    private fun showLost(
+        frame: FrameLayout, lv: Level, extrasSoFar: Int, byTime: Boolean,
+        onContinue: () -> Unit, onGiveUp: () -> Unit
+    ) {
+        val item = if (byTime) Item.TIME else Item.ATTEMPT
+        val stock = store.count(item)
         val cost = Rules.extraCost(extrasSoFar)
         val canPay = store.coins >= cost
         overlay(frame) { card, close ->
-            card.addWrap(text(S.t("lose"), 26f, bold = true), 0f)
-            card.addWrap(text(hearts(0, Rules.MAX_ATTEMPTS), 26f), 8f)
-            card.addFull(text(S.t("lose_sub"), 15f, color = Palette.QUIET), 8f)
-            card.addFull(button(S.f("extra", cost), primary = true, enabled = canPay, fill = Palette.ACCENT) {
+            card.addWrap(text(S.t(if (byTime) "time_up" else "lose"), 26f, bold = true), 0f)
+            if (!byTime) card.addWrap(text(hearts(0, Rules.MAX_ATTEMPTS), 26f), 8f)
+            card.addFull(text(S.t(if (byTime) "time_sub" else "lose_sub"), 15f, color = Palette.QUIET), 8f)
+            if (stock > 0) {
+                card.addFull(button(S.f(if (byTime) "use_time" else "use_attempt", stock), primary = true, fill = Palette.PRIMARY) {
+                    store.useItem(item)
+                    close()
+                    onContinue()
+                }, 22f)
+            }
+            card.addFull(button(S.f(if (byTime) "extra_time" else "extra", cost), primary = stock == 0,
+                enabled = canPay, fill = Palette.ACCENT) {
                 store.coins = store.coins - cost
                 close()
                 onContinue()
-            }, 22f)
+            }, if (stock > 0) 10f else 22f)
             card.addFull(text(
-                if (canPay) S.t("extra_note") else "${S.t("no_coins")} · ● ${store.coins}",
+                if (canPay || stock > 0) S.t("extra_note") else "${S.t("no_coins")} · ● ${store.coins}",
                 12f, color = Palette.QUIET), 6f)
             card.addPair(
                 button(S.t("retry")) { onGiveUp(); showGame(lv) },
                 button(S.t("levels")) { onGiveUp(); showLevels() }, 16f)
         }
+    }
+
+    // ------------------------------------------------------------ negozio
+    private fun swatches(t: Theme): CharSequence {
+        val sb = SpannableStringBuilder()
+        for (i in 0 until 6) {
+            val start = sb.length
+            sb.append("●")
+            sb.setSpan(ForegroundColorSpan(t.arrows[i]), start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sb.append(" ")
+        }
+        return sb
+    }
+
+    private fun showShop() {
+        val outer = column()
+        val coins = text("● ${store.coins}", 16f, bold = true, color = Palette.INK)
+        outer.addFull(topBar(S.t("shop"), { showMenu() }, coins), 0f)
+        val col = column().apply { setPadding(dp(18f), dp(4f), dp(18f), dp(28f)) }
+
+        fun section(key: String, top: Float) =
+            col.addFull(text(S.t(key), 18f, bold = true).apply { gravity = Gravity.START }, top)
+
+        section("shop_themes", 4f)
+        val current = store.themeId
+        for (t in Themes.all) {
+            val has = store.hasTheme(t)
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                // anteprima: la scheda usa lo sfondo del tema
+                background = rounded(t.bg, 16f, if (t.id == current) Palette.PRIMARY else t.line, if (t.id == current) 2.5f else 1.5f)
+                setPadding(dp(14f), dp(10f), dp(10f), dp(10f))
+            }
+            val info = column().apply { gravity = Gravity.START }
+            info.addFull(text(t.name, 16f, bold = true, color = t.ink).apply { gravity = Gravity.START }, 0f)
+            info.addFull(text(swatches(t), 16f).apply { gravity = Gravity.START }, 2f)
+            row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val action: View = when {
+                t.id == current -> text(S.t("in_use"), 14f, bold = true, color = t.primary)
+                has -> smallButton(S.t("use"), primary = true, fill = t.primary) {
+                    store.themeId = t.id
+                    Palette.apply(t)
+                    setupSystemBars()
+                    showShop()
+                }
+                t.unlockLevel > 0 -> text(S.f("unlock_at", t.unlockLevel), 12f, color = t.quiet)
+                else -> smallButton(S.f("buy", t.price), primary = store.coins >= t.price, fill = t.primary) {
+                    if (store.buyTheme(t)) {
+                        Toast.makeText(this, S.t("bought"), Toast.LENGTH_SHORT).show()
+                        showShop()
+                    } else Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
+                }
+            }
+            row.addView(action, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            col.addFull(row, 10f)
+        }
+
+        section("shop_items", 26f)
+        val items = listOf(
+            Triple(Item.HINTS, "item_hint", "item_hint_sub"),
+            Triple(Item.ATTEMPT, "item_attempt", "item_attempt_sub"),
+            Triple(Item.TIME, "item_time", "item_time_sub"),
+            Triple(Item.REVEAL, "item_reveal", "item_reveal_sub"),
+        )
+        for ((item, nameKey, subKey) in items) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(Palette.CARD, 16f, Palette.LINE)
+                setPadding(dp(14f), dp(10f), dp(10f), dp(10f))
+            }
+            val info = column().apply { gravity = Gravity.START }
+            info.addFull(text(S.t(nameKey), 16f, bold = true).apply { gravity = Gravity.START }, 0f)
+            info.addFull(text(S.t(subKey), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+            info.addFull(text(S.f("owned", store.count(item)), 12f, bold = true, color = Palette.PRIMARY).apply { gravity = Gravity.START }, 2f)
+            row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(smallButton(S.f("buy", item.price), primary = store.coins >= item.price) {
+                if (store.buyItem(item)) {
+                    Toast.makeText(this, S.t("bought"), Toast.LENGTH_SHORT).show()
+                    showShop()
+                } else Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            col.addFull(row, 10f)
+        }
+        col.addFull(text(S.t("shop_soon"), 13f, color = Palette.QUIET), 22f)
+
+        val scroll = ScrollView(this).apply { addView(col) }
+        outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setScreen(Screen.SHOP, outer)
     }
 
     // ------------------------------------------------------------ impostazioni
@@ -544,6 +793,10 @@ class MainActivity : Activity() {
             col.addFull(row, 8f)
         }
         if (!any) col.addFull(text(S.t("stats_empty"), 15f, color = Palette.QUIET), 24f)
+        col.addFull(button(S.t("test_coins"), primary = true, fill = Palette.BOSS) {
+            store.coins = store.coins + 500
+            Toast.makeText(this, "● ${store.coins}", Toast.LENGTH_SHORT).show()
+        }, 24f)
         val scroll = ScrollView(this).apply { addView(col) }
         outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setScreen(Screen.STATS, outer)
@@ -573,7 +826,7 @@ class MainActivity : Activity() {
         when (screen) {
             Screen.GAME -> showLevels()
             Screen.STATS -> showSettings()
-            Screen.LEVELS, Screen.SETTINGS -> showMenu()
+            Screen.LEVELS, Screen.SETTINGS, Screen.SHOP -> showMenu()
             Screen.MENU, Screen.LANGUAGE -> {
                 @Suppress("DEPRECATION")
                 super.onBackPressed()
