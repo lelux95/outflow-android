@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icona: tre frecce che escono da una griglia, stile minimal -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- griglia 2x2 sfumata -->
+    <path android:fillColor="#DDD6C8" android:pathData="M36,40h14v14h-14z" />
+    <path android:fillColor="#DDD6C8" android:pathData="M58,40h14v14h-14z" />
+    <path android:fillColor="#DDD6C8" android:pathData="M36,62h14v14h-14z" />
+    <path android:fillColor="#DDD6C8" android:pathData="M58,62h14v14h-14z" />
+    <!-- freccia principale verso l'alto a destra -->
+    <path
+        android:strokeColor="#2B2A28"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M65,69 L65,38" />
+    <path android:fillColor="#2B2A28" android:pathData="M65,28 L74,41 L56,41 Z" />
+    <!-- freccia verso sinistra -->
+    <path
+        android:strokeColor="#E0683C"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:pathData="M47,69 L36,69" />
+    <path android:fillColor="#E0683C" android:pathData="M28,69 L39,61 L39,77 Z" />
+</vector>

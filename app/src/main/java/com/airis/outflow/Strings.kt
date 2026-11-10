@@ -1,0 +1,86 @@
+package com.airis.outflow
+
+/** Testi del gioco in inglese e italiano. La lingua si sceglie al primo avvio. */
+object S {
+    var lang = "en"
+
+    private val enMap = mapOf(
+        "subtitle" to "Arrow Puzzle",
+        "choose_lang" to "Choose your language",
+        "play" to "Play",
+        "settings" to "Settings",
+        "themes_soon" to "Themes · coming soon",
+        "coins" to "Coins",
+        "stars" to "Stars",
+        "levels" to "Levels",
+        "level" to "Level %d",
+        "attempts" to "Attempts %d/%d",
+        "restart" to "Restart",
+        "hint" to "Hint · %d coins",
+        "no_coins" to "Not enough coins for a hint",
+        "tut1" to "Tap an arrow: it slides out if its path is clear.",
+        "tut2" to "Blocked arrow? You lose an attempt. Plan the order!",
+        "win" to "Level complete!",
+        "earned" to "+%d coins",
+        "no_earned" to "No new coins · beat your best to earn more",
+        "next" to "Next level",
+        "retry" to "Retry",
+        "lose" to "Out of attempts",
+        "lose_sub" to "The shape resets. Try a different order.",
+        "language" to "Language",
+        "vibration" to "Vibration",
+        "on" to "On",
+        "off" to "Off",
+        "reset" to "Reset progress",
+        "reset_q" to "Delete all stars and coins?",
+        "reset_q2" to "Are you sure? This cannot be undone.",
+        "reset_done" to "Progress reset",
+        "yes" to "Yes",
+        "cancel" to "Cancel",
+        "back" to "Back",
+        "all_done" to "You finished every level! More are coming soon.",
+        "version" to "Version %s",
+    )
+
+    private val itMap = mapOf(
+        "subtitle" to "Arrow Puzzle",
+        "choose_lang" to "Scegli la lingua",
+        "play" to "Gioca",
+        "settings" to "Impostazioni",
+        "themes_soon" to "Temi · in arrivo",
+        "coins" to "Monete",
+        "stars" to "Stelle",
+        "levels" to "Livelli",
+        "level" to "Livello %d",
+        "attempts" to "Tentativi %d/%d",
+        "restart" to "Ricomincia",
+        "hint" to "Aiuto · %d monete",
+        "no_coins" to "Monete insufficienti per un aiuto",
+        "tut1" to "Tocca una freccia: esce se la strada è libera.",
+        "tut2" to "Freccia bloccata? Perdi un tentativo. Pensa all'ordine!",
+        "win" to "Livello completato!",
+        "earned" to "+%d monete",
+        "no_earned" to "Nessuna moneta nuova · migliora il record per guadagnarne",
+        "next" to "Livello successivo",
+        "retry" to "Riprova",
+        "lose" to "Tentativi finiti",
+        "lose_sub" to "La figura si ricompone. Prova un ordine diverso.",
+        "language" to "Lingua",
+        "vibration" to "Vibrazione",
+        "on" to "Sì",
+        "off" to "No",
+        "reset" to "Azzera progressi",
+        "reset_q" to "Cancellare tutte le stelle e le monete?",
+        "reset_q2" to "Sei sicuro? Non si può annullare.",
+        "reset_done" to "Progressi azzerati",
+        "yes" to "Sì",
+        "cancel" to "Annulla",
+        "back" to "Indietro",
+        "all_done" to "Hai completato tutti i livelli! Ne arriveranno altri presto.",
+        "version" to "Versione %s",
+    )
+
+    fun t(key: String): String = (if (lang == "it") itMap else enMap)[key] ?: key
+
+    fun f(key: String, vararg args: Any): String = String.format(t(key), *args)
+}
