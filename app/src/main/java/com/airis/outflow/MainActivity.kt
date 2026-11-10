@@ -28,7 +28,7 @@ import android.widget.Toast
 
 class MainActivity : Activity() {
 
-    private enum class Screen { LANGUAGE, MENU, LEVELS, GAME, SETTINGS, STATS, SHOP }
+    private enum class Screen { LANGUAGE, NAME, MENU, LEVELS, GAME, SETTINGS, STATS, SHOP, PROFILE }
 
     private lateinit var store: Store
     private lateinit var sounds: Sounds
@@ -58,7 +58,11 @@ class MainActivity : Activity() {
         setContentView(root)
         setupSystemBars()
 
-        if (store.lang == null) showLanguage() else showMenu()
+        when {
+            store.lang == null -> showLanguage()
+            !store.nameAsked -> showName()
+            else -> showMenu()
+        }
     }
 
     override fun onResume() {
@@ -237,7 +241,49 @@ class MainActivity : Activity() {
     private fun pickLanguage(l: String) {
         store.lang = l
         S.lang = l
-        showMenu()
+        if (!store.nameAsked) showName() else showMenu()
+    }
+
+    private fun nameField(initial: String): android.widget.EditText =
+        android.widget.EditText(this).apply {
+            setText(initial)
+            hint = S.t("name_hint")
+            setSingleLine()
+            filters = arrayOf(android.text.InputFilter.LengthFilter(16))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+            setTextColor(Palette.INK)
+            setHintTextColor(Palette.QUIET)
+            gravity = Gravity.CENTER
+            background = rounded(Palette.CARD, 16f, Palette.LINE)
+            setPadding(dp(16f), dp(14f), dp(16f), dp(14f))
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+        }
+
+    /** Primo avvio: nome del giocatore (si puo' saltare). */
+    private fun showName() {
+        val col = column().apply { gravity = Gravity.CENTER; setPadding(dp(32f), 0, dp(32f), 0) }
+        col.addWrap(logo(40f), 0f)
+        col.addWrap(text(S.t("name_q"), 24f, bold = true), 28f)
+        col.addFull(text(S.t("name_sub"), 14f, color = Palette.QUIET), 6f)
+        val field = nameField(store.playerName)
+        col.addFull(field, 24f)
+        col.addFull(button(S.t("ok"), primary = true) {
+            store.playerName = field.text.toString()
+            store.nameAsked = true
+            hideKeyboard(field)
+            showMenu()
+        }, 20f)
+        col.addFull(button(S.t("skip")) {
+            store.nameAsked = true
+            hideKeyboard(field)
+            showMenu()
+        }, 10f)
+        setScreen(Screen.NAME, col)
+    }
+
+    private fun hideKeyboard(v: View) {
+        (getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+            ?.hideSoftInputFromWindow(v.windowToken, 0)
     }
 
     private fun showMenu() {
@@ -246,7 +292,10 @@ class MainActivity : Activity() {
         frame.addView(anim, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
         val col = column().apply { gravity = Gravity.CENTER; setPadding(dp(32f), 0, dp(32f), 0) }
-        col.addWrap(logo(52f), 0f)
+        if (store.playerName.isNotBlank()) {
+            col.addWrap(text(S.f("hello", store.playerName), 18f, bold = true, color = Palette.PRIMARY), 0f)
+        }
+        col.addWrap(logo(52f), 4f)
         col.addWrap(text(S.t("subtitle"), 16f, color = Palette.QUIET), 0f)
 
         val stats = text(
@@ -269,7 +318,9 @@ class MainActivity : Activity() {
         val next = nextLevelId()
         col.addFull(button(S.f("continue_lv", next), primary = true) { startLevel(next) }, if (gift > 0) 12f else 32f)
         col.addFull(button(S.t("levels")) { showLevels() }, 12f)
-        col.addFull(button(S.t("shop")) { showShop() }, 12f)
+        col.addPair(
+            button(S.t("shop")) { showShop() },
+            button(S.t("profile")) { showProfile() }, 12f)
         col.addFull(button(S.t("settings")) { showSettings() }, 12f)
         frame.addView(col, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
@@ -452,7 +503,21 @@ class MainActivity : Activity() {
 
         val game = GameView(this)
         game.vibrate = store.vibration
-        col.addView(game, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        game.style = ArrowStyle.byId(store.styleId)
+        game.trail = Trail.byId(store.trailId)
+        val gameBox = FrameLayout(this)
+        gameBox.addView(game, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val fullView = text("⤢ " + S.t("full_view"), 13f, bold = true, color = Color.WHITE).apply {
+            background = rounded(Palette.INK, 18f)
+            alpha = 0.85f
+            setPadding(dp(14f), dp(8f), dp(14f), dp(8f))
+            visibility = View.GONE
+            setOnClickListener { sounds.tap(); game.resetZoom() }
+        }
+        gameBox.addView(fullView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END).apply { setMargins(0, dp(6f), dp(12f), 0) })
+        game.onZoomChanged = { zoomed -> fullView.visibility = if (zoomed) View.VISIBLE else View.GONE }
+        col.addView(gameBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         val coinsLabel = text("● ${store.coins}", 14f, bold = true, color = Palette.QUIET)
         col.addWrap(coinsLabel, 0f)
@@ -529,7 +594,10 @@ class MainActivity : Activity() {
 
         game.listener = object : GameView.Listener {
             override fun onTap() {}
-            override fun onArrowOut(remaining: Int) = sounds.out()
+            override fun onArrowOut(remaining: Int) {
+                sounds.out()
+                store.arrowsFreed = store.arrowsFreed + 1
+            }
             override fun onMistake(attemptsLeft: Int) {
                 sounds.error()
                 heartsLabel.text = hearts(attemptsLeft.coerceAtLeast(0), totalHearts())
@@ -539,6 +607,7 @@ class MainActivity : Activity() {
                 sounds.win()
                 val ms = SystemClock.elapsedRealtime() - startedAt
                 store.recordPlay(id, true, ms, game.errors, extras)
+                if (lv.boss) store.recordBossTime(id, ms)
                 showResult(frame, lv, game.errors, extras)
             }
             override fun onLose() = lost(false)
@@ -578,7 +647,13 @@ class MainActivity : Activity() {
         val earned = store.recordResult(lv, stars)
         val hasNext = levels.any { it.id == lv.id + 1 }
         overlay(frame) { card, _ ->
-            card.addWrap(text(S.t(if (lv.boss) "boss_win" else "win"), 26f, bold = true,
+            val name = store.playerName
+            val winTitle = when {
+                lv.boss -> S.t("boss_win")
+                name.isNotBlank() -> S.f("win_name", name)
+                else -> S.t("win")
+            }
+            card.addWrap(text(winTitle, 26f, bold = true,
                 color = if (lv.boss) Palette.BOSS else Palette.INK), 0f)
             card.addWrap(text(starsText(stars), 46f, color = Palette.STAR), 10f)
             card.addWrap(text(
@@ -712,7 +787,60 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             col.addFull(row, 10f)
         }
-        col.addFull(text(S.t("shop_soon"), 13f, color = Palette.QUIET), 22f)
+
+        // anteprima: una freccia a L che si puo' toccare per vederla uscire
+        fun preview(style: ArrowStyle, trail: Trail): GameView = GameView(this).apply {
+            previewMode = true
+            vibrate = false
+            this.style = style
+            this.trail = trail
+            setLevel(Level(0, "square", 4, 3, false, 0,
+                listOf(Arrow(intArrayOf(0, 1, 2, 2), intArrayOf(2, 2, 2, 1), 0))))
+        }
+
+        fun cosmeticRow(
+            title: String, desc: String, owned: Boolean, inUse: Boolean, price: Int, prev: GameView,
+            onUse: () -> Unit, onBuy: () -> Boolean
+        ) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                background = rounded(Palette.CARD, 16f, if (inUse) Palette.PRIMARY else Palette.LINE, if (inUse) 2.5f else 1.5f)
+                setPadding(dp(6f), dp(6f), dp(10f), dp(6f))
+            }
+            row.addView(prev, LinearLayout.LayoutParams(dp(84f), dp(64f)))
+            val info = column().apply { gravity = Gravity.START; setPadding(dp(6f), 0, dp(6f), 0) }
+            info.addFull(text(title, 16f, bold = true).apply { gravity = Gravity.START }, 0f)
+            info.addFull(text(desc, 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+            row.addView(info, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            val action: View = when {
+                inUse -> text(S.t("in_use"), 14f, bold = true, color = Palette.PRIMARY)
+                owned -> smallButton(S.t("use"), primary = true) { onUse(); showShop() }
+                else -> smallButton(S.f("buy", price), primary = store.coins >= price) {
+                    if (onBuy()) {
+                        Toast.makeText(this, S.t("bought"), Toast.LENGTH_SHORT).show()
+                        showShop()
+                    } else Toast.makeText(this, S.t("no_coins"), Toast.LENGTH_SHORT).show()
+                }
+            }
+            row.addView(action, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            col.addFull(row, 10f)
+        }
+
+        val curStyle = ArrowStyle.byId(store.styleId)
+        val curTrail = Trail.byId(store.trailId)
+        section("shop_styles", 26f)
+        col.addFull(text(S.t("tap_preview"), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+        for (st in ArrowStyle.entries) {
+            cosmeticRow(st.label, st.desc, store.hasStyle(st), st == curStyle, st.price, preview(st, Trail.NONE),
+                onUse = { store.styleId = st.id }, onBuy = { store.buyStyle(st) })
+        }
+        section("shop_trails", 26f)
+        col.addFull(text(S.t("tap_preview"), 12f, color = Palette.QUIET).apply { gravity = Gravity.START }, 2f)
+        for (tr in Trail.entries) {
+            cosmeticRow(tr.label, tr.desc, store.hasTrail(tr), tr == curTrail, tr.price, preview(curStyle, tr),
+                onUse = { store.trailId = tr.id }, onBuy = { store.buyTrail(tr) })
+        }
 
         val scroll = ScrollView(this).apply { addView(col) }
         outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -728,7 +856,15 @@ class MainActivity : Activity() {
         fun label(key: String, top: Float) =
             col.addFull(text(S.t(key), 14f, color = Palette.QUIET).apply { gravity = Gravity.START }, top)
 
-        label("language", 8f)
+        label("player_name", 8f)
+        col.addPair(
+            text(store.playerName.ifBlank { "—" }, 17f, bold = true).apply {
+                background = rounded(Palette.CARD, 16f, Palette.LINE)
+                setPadding(dp(12f), dp(15f), dp(12f), dp(15f))
+            },
+            button(S.t("change")) { editName { showSettings() } })
+
+        label("language", 22f)
         col.addPair(
             button("English", primary = S.lang == "en") { setLang("en") },
             button("Italiano", primary = S.lang == "it") { setLang("it") })
@@ -762,6 +898,94 @@ class MainActivity : Activity() {
         val scroll = ScrollView(this).apply { addView(col) }
         outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setScreen(Screen.SETTINGS, outer)
+    }
+
+    /** Finestra per cambiare il nome del giocatore. */
+    private fun editName(after: () -> Unit) {
+        val field = nameField(store.playerName)
+        val box = FrameLayout(this).apply { setPadding(dp(20f), dp(8f), dp(20f), 0); addView(field) }
+        AlertDialog.Builder(this)
+            .setTitle(S.t("player_name"))
+            .setView(box)
+            .setNegativeButton(S.t("cancel"), null)
+            .setPositiveButton(S.t("save")) { _, _ ->
+                store.playerName = field.text.toString()
+                store.nameAsked = true
+                after()
+            }
+            .show()
+    }
+
+    // ------------------------------------------------------------ profilo
+    private fun showProfile() {
+        val outer = column()
+        outer.addFull(topBar(S.t("profile"), { showMenu() }), 0f)
+        val col = column().apply { setPadding(dp(20f), dp(4f), dp(20f), dp(28f)) }
+
+        // intestazione: iniziale in un cerchio colorato + nome
+        val name = store.playerName
+        val initial = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        col.addWrap(text(initial, 34f, bold = true, color = Color.WHITE).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Palette.PRIMARY) }
+            layoutParams = LinearLayout.LayoutParams(dp(76f), dp(76f))
+        }, 4f)
+        (col.getChildAt(col.childCount - 1).layoutParams as LinearLayout.LayoutParams).apply { width = dp(76f); height = dp(76f) }
+        col.addWrap(text(name.ifBlank { "—" }, 24f, bold = true), 10f)
+        col.addWrap(button(S.t("change")) { editName { showProfile() } }.apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(dp(18f), dp(8f), dp(18f), dp(8f))
+        }, 8f)
+
+        val completed = levels.count { store.stars(it.id) > 0 }
+        val bosses = levels.count { it.boss && store.stars(it.id) > 0 }
+        val streak = store.giftStreak()
+        val stats = listOf(
+            S.t("p_stars") to "★ ${store.totalStars(levels.size)} / ${levels.size * 3}",
+            S.t("p_levels") to "$completed / ${levels.size}",
+            S.t("p_bosses") to "$bosses / ${levels.count { it.boss }}",
+            S.t("p_arrows") to "${store.arrowsFreed}",
+            S.t("p_coins") to "● ${store.coins}",
+            S.t("p_streak") to S.f("p_days", streak),
+        )
+        val grid = GridLayout(this).apply { columnCount = 2 }
+        for ((label, value) in stats) {
+            val card = column().apply {
+                background = rounded(Palette.CARD, 16f, Palette.LINE)
+                setPadding(dp(10f), dp(12f), dp(10f), dp(12f))
+            }
+            card.addWrap(text(value, 18f, bold = true, color = Palette.INK), 0f)
+            card.addWrap(text(label, 12f, color = Palette.QUIET), 2f)
+            grid.addView(card, GridLayout.LayoutParams(
+                GridLayout.spec(GridLayout.UNDEFINED, 1f), GridLayout.spec(GridLayout.UNDEFINED, 1f)
+            ).apply { width = 0; setMargins(dp(5f), dp(5f), dp(5f), dp(5f)) })
+        }
+        col.addFull(grid, 18f)
+
+        col.addFull(text(S.t("p_look"), 17f, bold = true).apply { gravity = Gravity.START }, 20f)
+        col.addFull(text("${Themes.byId(store.themeId).name} · ${ArrowStyle.byId(store.styleId).label} · ${Trail.byId(store.trailId).label}",
+            14f, color = Palette.QUIET).apply { gravity = Gravity.START }, 4f)
+
+        col.addFull(text(S.t("p_boss_times"), 17f, bold = true).apply { gravity = Gravity.START }, 20f)
+        var anyBoss = false
+        for (lv in levels.filter { it.boss }) {
+            val best = store.bossBest(lv.id)
+            if (best == 0L) continue
+            anyBoss = true
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                background = rounded(Palette.CARD, 12f, Palette.BOSS)
+                setPadding(dp(14f), dp(10f), dp(14f), dp(10f))
+            }
+            row.addView(text("${S.f("level", lv.id)} · ${S.t("boss")}", 15f, bold = true, color = Palette.BOSS).apply { gravity = Gravity.START },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(text("⏱ ${fmtTime(best)} / ${fmtTime(lv.time * 1000L)}", 15f, bold = true))
+            col.addFull(row, 8f)
+        }
+        if (!anyBoss) col.addFull(text(S.t("p_none"), 14f, color = Palette.QUIET).apply { gravity = Gravity.START }, 6f)
+
+        val scroll = ScrollView(this).apply { addView(col) }
+        outer.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        setScreen(Screen.PROFILE, outer)
     }
 
     private fun setLang(l: String) {
@@ -826,7 +1050,8 @@ class MainActivity : Activity() {
         when (screen) {
             Screen.GAME -> showLevels()
             Screen.STATS -> showSettings()
-            Screen.LEVELS, Screen.SETTINGS, Screen.SHOP -> showMenu()
+            Screen.LEVELS, Screen.SETTINGS, Screen.SHOP, Screen.PROFILE -> showMenu()
+            Screen.NAME -> { store.nameAsked = true; showMenu() }
             Screen.MENU, Screen.LANGUAGE -> {
                 @Suppress("DEPRECATION")
                 super.onBackPressed()

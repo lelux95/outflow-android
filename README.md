@@ -18,6 +18,17 @@ ogni livello è verificato come risolvibile) e salvati in `app/src/main/assets/l
 python3 tools/generate_levels.py
 ```
 
+## Versione alpha 0.4.0
+
+- Griglie piene al 100%: generatore "riempi e ripara" (copre tutta la griglia, poi gira o spezza
+  le frecce che creano blocchi senza uscita); da 19 frecce (liv. 1) a 129 (liv. 100), griglie fino a 17×27
+- Boss sempre a griglia piena; tempo ≈ 0,9 s per freccia, minimo 45 s (fino a 1:45)
+- Pulsante "Vista intera" quando la griglia è ingrandita
+- Negozio: 6 stili freccia (Classica, Marker, Gesso, Neon, Pixel, Binario) e 6 scie
+  (Nessuna, Scintille, Coriandoli, Stelline, Fumo, Arcobaleno) con anteprima toccabile
+- Nome giocatore al primo avvio (modificabile), saluto in home e alla vittoria
+- Profilo: stelle, livelli e boss completati, frecce liberate, monete, giorni di regalo, migliori tempi sui boss
+
 ## Versione alpha 0.3.0
 
 - Livelli più grandi e difficili: griglie rettangolari da 6×7 a 15×19, frecce da 2 a 9 caselle,

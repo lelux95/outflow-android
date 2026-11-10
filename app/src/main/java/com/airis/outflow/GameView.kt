@@ -3,7 +3,9 @@ package com.airis.outflow
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.ComposePathEffect
 import android.graphics.CornerPathEffect
+import android.graphics.DiscretePathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.os.Build
@@ -35,6 +37,28 @@ class GameView(context: Context) : View(context) {
 
     var listener: Listener? = null
     var vibrate = true
+
+    /** Stile delle frecce e scia d'uscita scelti nel negozio. */
+    var style = ArrowStyle.CLASSIC
+        set(v) { field = v; configureStyle(); invalidate() }
+    var trail = Trail.NONE
+
+    /** Modalita' anteprima (negozio): al tocco la freccia esce e poi ricompare. */
+    var previewMode = false
+
+    /** Avvisa quando la griglia e' ingrandita (per mostrare il pulsante "vista intera"). */
+    var onZoomChanged: ((Boolean) -> Unit)? = null
+    private var wasZoomed = false
+
+    private class Particle(
+        var x: Float, var y: Float, val vx: Float, val vy: Float,
+        val born: Long, val life: Float, val color: Int, val size: Float, val rot: Float
+    )
+    private val particles = ArrayList<Particle>()
+    private val partPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val starPath = Path()
+    private var lastEmit = 0L
+    private var hue = 0f
 
     var attempts = Rules.MAX_ATTEMPTS
         private set
@@ -124,6 +148,7 @@ class GameView(context: Context) : View(context) {
         shakeIdx = -1; blockIdx = -1; hintIdx = -1
         revealSet = BooleanArray(arrows.size)
         revealStart = 0L
+        particles.clear()
         z = 1f; panX = 0f; panY = 0f
         relayout()
         invalidate()
@@ -247,7 +272,19 @@ class GameView(context: Context) : View(context) {
         applyTransform()
     }
 
+    /** Torna alla vista intera della griglia. */
+    fun resetZoom() {
+        z = 1f; panX = 0f; panY = 0f
+        applyTransform()
+        invalidate()
+    }
+
     private fun applyTransform() {
+        val zoomed = z > 1.02f
+        if (zoomed != wasZoomed) {
+            wasZoomed = zoomed
+            onZoomChanged?.invoke(zoomed)
+        }
         val l = level ?: return
         cell = baseCell * z
         val cw = cell * l.w
@@ -258,8 +295,30 @@ class GameView(context: Context) : View(context) {
         panY = if (z <= 1f) 0f else panY.coerceIn(-limY, limY)
         ox = (width - cw) / 2f + panX
         oy = (height - ch) / 2f + panY
-        stroke.pathEffect = CornerPathEffect(cell * 0.32f)
-        glow.pathEffect = CornerPathEffect(cell * 0.32f)
+        configureStyle()
+    }
+
+    private fun configureStyle() {
+        if (cell <= 0f) return
+        val corner = CornerPathEffect(cell * 0.32f)
+        glow.pathEffect = corner
+        when (style) {
+            ArrowStyle.PIXEL -> {
+                stroke.pathEffect = null
+                stroke.strokeCap = Paint.Cap.SQUARE
+                stroke.strokeJoin = Paint.Join.MITER
+            }
+            ArrowStyle.CHALK -> {
+                stroke.pathEffect = ComposePathEffect(DiscretePathEffect(cell * 0.09f, cell * 0.035f), corner)
+                stroke.strokeCap = Paint.Cap.ROUND
+                stroke.strokeJoin = Paint.Join.ROUND
+            }
+            else -> {
+                stroke.pathEffect = corner
+                stroke.strokeCap = Paint.Cap.ROUND
+                stroke.strokeJoin = Paint.Join.ROUND
+            }
+        }
     }
 
     /** Indice della prima freccia che blocca la freccia i, oppure -1 se la strada e' libera. */
@@ -328,7 +387,8 @@ class GameView(context: Context) : View(context) {
             listener?.onArrowOut(remaining)
             if (remaining == 0) {
                 finished = true
-                postDelayed({ listener?.onWin() }, 550)
+                if (previewMode) postDelayed({ level?.let { lv -> setLevel(lv) } }, 1100)
+                else postDelayed({ listener?.onWin() }, 550)
             }
         } else {
             attempts--
@@ -418,9 +478,12 @@ class GameView(context: Context) : View(context) {
             if (s > FAR || tx < -cell || ty < -cell || tx > width + cell || ty > height + cell) {
                 it.remove(); continue
             }
+            if (trail != Trail.NONE && now - lastEmit >= 16) emit(tx, ty, colors[f.idx], now)
             drawArrow(canvas, f.idx, s, 0f, colors[f.idx], 1f, -1)
             animating = true
         }
+        if (flying.isNotEmpty()) lastEmit = now
+        if (drawParticles(canvas, now)) animating = true
 
         if (animating) postInvalidateOnAnimation()
     }
@@ -461,11 +524,136 @@ class GameView(context: Context) : View(context) {
             c.drawPath(body, glow)
             return
         }
-        stroke.color = color
-        stroke.strokeWidth = cell * 0.12f * widthMul
         head.color = color
-        c.drawPath(body, stroke)
-        c.drawPath(tip, head)
+        when (style) {
+            ArrowStyle.CLASSIC -> {
+                stroke.color = color
+                stroke.strokeWidth = cell * 0.12f * widthMul
+                c.drawPath(body, stroke)
+            }
+            ArrowStyle.MARKER -> {
+                stroke.color = color
+                stroke.strokeWidth = cell * 0.21f * widthMul
+                c.drawPath(body, stroke)
+            }
+            ArrowStyle.CHALK -> {
+                stroke.color = color
+                stroke.alpha = 225
+                stroke.strokeWidth = cell * 0.13f * widthMul
+                c.drawPath(body, stroke)
+                stroke.alpha = 255
+            }
+            ArrowStyle.NEON -> {
+                glow.color = color
+                glow.alpha = 55
+                glow.strokeWidth = cell * 0.42f * widthMul
+                c.drawPath(body, glow)
+                glow.alpha = 110
+                glow.strokeWidth = cell * 0.22f * widthMul
+                c.drawPath(body, glow)
+                stroke.color = lighten(color, 0.55f)
+                stroke.strokeWidth = cell * 0.08f * widthMul
+                c.drawPath(body, stroke)
+                head.color = lighten(color, 0.35f)
+            }
+            ArrowStyle.PIXEL -> {
+                stroke.color = color
+                stroke.strokeWidth = cell * 0.17f * widthMul
+                c.drawPath(body, stroke)
+            }
+            ArrowStyle.RAIL -> {
+                stroke.color = color
+                stroke.strokeWidth = cell * 0.24f * widthMul
+                c.drawPath(body, stroke)
+                stroke.color = Palette.BG
+                stroke.strokeWidth = cell * 0.09f * widthMul
+                c.drawPath(body, stroke)
+            }
+        }
+        if (style == ArrowStyle.MARKER) {
+            c.save()
+            c.scale(1.2f, 1.2f, hx, hy)
+            c.drawPath(tip, head)
+            c.restore()
+        } else c.drawPath(tip, head)
+    }
+
+    private fun lighten(color: Int, amount: Float): Int {
+        fun ch(s: Int) = (color shr s) and 0xFF
+        fun mix(s: Int) = (ch(s) + (255 - ch(s)) * amount).toInt().coerceIn(0, 255)
+        return (0xFF shl 24) or (mix(16) shl 16) or (mix(8) shl 8) or mix(0)
+    }
+
+    // ------------------------------------------------------------ scie
+    private val rnd = kotlin.random.Random(SystemClock.uptimeMillis())
+
+    private fun emit(x: Float, y: Float, color: Int, now: Long) {
+        val sp = cell * 3f
+        when (trail) {
+            Trail.SPARKS -> repeat(3) {
+                particles.add(Particle(x, y, (rnd.nextFloat() - 0.5f) * sp, (rnd.nextFloat() - 0.5f) * sp, now,
+                    0.35f + rnd.nextFloat() * 0.2f, if (rnd.nextBoolean()) 0xFFFFF3B0.toInt() else 0xFFFFC94A.toInt(), cell * 0.07f, 0f))
+            }
+            Trail.CONFETTI -> repeat(2) {
+                particles.add(Particle(x, y, (rnd.nextFloat() - 0.5f) * sp, rnd.nextFloat() * sp * 0.6f, now,
+                    0.7f, Palette.ARROWS[rnd.nextInt(Palette.ARROWS.size)], cell * 0.13f, rnd.nextFloat() * 360f))
+            }
+            Trail.STARS -> if (rnd.nextFloat() < 0.6f) {
+                particles.add(Particle(x, y, (rnd.nextFloat() - 0.5f) * sp * 0.5f, (rnd.nextFloat() - 0.5f) * sp * 0.5f, now,
+                    0.6f, 0xFFFFD54F.toInt(), cell * 0.16f, rnd.nextFloat() * 72f))
+            }
+            Trail.SMOKE -> particles.add(Particle(x, y, (rnd.nextFloat() - 0.5f) * sp * 0.2f, -cell * 0.6f, now,
+                0.8f, if (Palette.DARK) 0xFFB8B8B8.toInt() else 0xFF9A948A.toInt(), cell * 0.18f, 0f))
+            Trail.RAINBOW -> {
+                hue = (hue + 18f) % 360f
+                particles.add(Particle(x, y, 0f, 0f, now, 0.45f,
+                    android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.75f, 1f)), cell * 0.16f, 0f))
+            }
+            Trail.NONE -> {}
+        }
+        if (particles.size > 400) particles.subList(0, particles.size - 400).clear()
+    }
+
+    private fun drawParticles(c: Canvas, now: Long): Boolean {
+        if (particles.isEmpty()) return false
+        val it = particles.iterator()
+        while (it.hasNext()) {
+            val p = it.next()
+            val age = (now - p.born) / 1000f
+            val t = age / p.life
+            if (t >= 1f) { it.remove(); continue }
+            val px = p.x + p.vx * age
+            val py = p.y + p.vy * age + (if (trail == Trail.CONFETTI) cell * 2f * age * age else 0f)
+            partPaint.color = p.color
+            partPaint.alpha = (255 * (1 - t)).toInt()
+            when (trail) {
+                Trail.CONFETTI -> {
+                    c.save()
+                    c.rotate(p.rot + age * 400f, px, py)
+                    c.drawRect(px - p.size / 2, py - p.size / 4, px + p.size / 2, py + p.size / 4, partPaint)
+                    c.restore()
+                }
+                Trail.STARS -> {
+                    val r = p.size * (1f - 0.4f * t)
+                    starPath.reset()
+                    for (k in 0 until 10) {
+                        val ang = Math.toRadians((p.rot + k * 36f - 90f).toDouble())
+                        val rr = if (k % 2 == 0) r else r * 0.45f
+                        val sx = px + (kotlin.math.cos(ang) * rr).toFloat()
+                        val sy = py + (sin(ang) * rr).toFloat()
+                        if (k == 0) starPath.moveTo(sx, sy) else starPath.lineTo(sx, sy)
+                    }
+                    starPath.close()
+                    c.drawPath(starPath, partPaint)
+                }
+                Trail.SMOKE -> {
+                    partPaint.alpha = (110 * (1 - t)).toInt()
+                    c.drawCircle(px, py, p.size * (1f + 2f * t), partPaint)
+                }
+                else -> c.drawCircle(px, py, p.size * (1f - 0.5f * t), partPaint)
+            }
+        }
+        return true
     }
 
     companion object {

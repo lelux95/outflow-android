@@ -86,19 +86,21 @@ enum class Item(val key: String, val price: Int, val qty: Int) {
 /** Statistiche di una partita, registrate per la modalita' Tester. */
 class PlayStat(val plays: Int, val wins: Int, val bestStars: Int, val lastMs: Long, val lastErrors: Int, val extrasBought: Int)
 
-/** Salvataggio locale. "outflow_v3": livelli nuovi, si riparte da zero (restano lingua e impostazioni). */
+/** Salvataggio locale. "outflow_v4": livelli nuovi, si riparte da zero (restano lingua e impostazioni). */
 class Store(ctx: Context) {
-    private val p = ctx.getSharedPreferences("outflow_v3", Context.MODE_PRIVATE)
+    private val p = ctx.getSharedPreferences("outflow_v4", Context.MODE_PRIVATE)
 
     init {
         // porta con se' solo lingua e vibrazione dalla versione precedente
         if (!p.contains("migrated")) {
             val e = p.edit().putBoolean("migrated", true)
-            for (name in listOf("outflow_v2", "outflow")) {
+            for (name in listOf("outflow_v3", "outflow_v2", "outflow")) {
                 val old = ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
                 val lang = old.getString("lang", null) ?: continue
                 e.putString("lang", lang)
                 for (k in listOf("vibration", "sound", "tester")) if (old.contains(k)) e.putBoolean(k, old.getBoolean(k, true))
+                old.getString("name", null)?.let { e.putString("name", it) }
+                if (old.contains("name_asked")) e.putBoolean("name_asked", old.getBoolean("name_asked", false))
                 break
             }
             e.apply()
@@ -142,6 +144,57 @@ class Store(ctx: Context) {
         if (hasTheme(t) || t.unlockLevel > 0 || coins < t.price) return false
         p.edit().putInt("coins", coins - t.price).putBoolean("owned_${t.id}", true).apply()
         return true
+    }
+
+    // ------------------------------------------------ nome, stili, scie, profilo
+    var playerName: String
+        get() = p.getString("name", "") ?: ""
+        set(v) { p.edit().putString("name", v.trim().take(16)).apply() }
+
+    /** true dopo che il giocatore ha visto la richiesta del nome (anche se l'ha saltata). */
+    var nameAsked: Boolean
+        get() = p.getBoolean("name_asked", false)
+        set(v) { p.edit().putBoolean("name_asked", v).apply() }
+
+    var styleId: String
+        get() = p.getString("style", "classic") ?: "classic"
+        set(v) { p.edit().putString("style", v).apply() }
+
+    var trailId: String
+        get() = p.getString("trail", "none") ?: "none"
+        set(v) { p.edit().putString("trail", v).apply() }
+
+    fun hasStyle(s: ArrowStyle) = s.price == 0 || p.getBoolean("own_style_${s.id}", false)
+    fun hasTrail(t: Trail) = t.price == 0 || p.getBoolean("own_trail_${t.id}", false)
+
+    fun buyStyle(s: ArrowStyle): Boolean {
+        if (hasStyle(s) || coins < s.price) return false
+        p.edit().putInt("coins", coins - s.price).putBoolean("own_style_${s.id}", true).apply()
+        return true
+    }
+
+    fun buyTrail(t: Trail): Boolean {
+        if (hasTrail(t) || coins < t.price) return false
+        p.edit().putInt("coins", coins - t.price).putBoolean("own_trail_${t.id}", true).apply()
+        return true
+    }
+
+    var arrowsFreed: Int
+        get() = p.getInt("arrows_freed", 0)
+        set(v) { p.edit().putInt("arrows_freed", v).apply() }
+
+    /** Miglior tempo su un boss (ms), 0 se mai vinto. */
+    fun bossBest(id: Int): Long = p.getLong("boss_best_$id", 0)
+
+    fun recordBossTime(id: Int, ms: Long) {
+        val b = bossBest(id)
+        if (b == 0L || ms < b) p.edit().putLong("boss_best_$id", ms).apply()
+    }
+
+    fun giftStreak(): Int {
+        val last = p.getLong("gift_day", -10)
+        val today = java.time.LocalDate.now().toEpochDay()
+        return if (last >= today - 1) p.getInt("gift_streak", 0) else 0
     }
 
     fun count(item: Item): Int = p.getInt("inv_${item.key}", 0)
@@ -223,8 +276,12 @@ class Store(ctx: Context) {
         val v = vibration
         val s = sound
         val t = p.getBoolean("tester", false)
+        val name = playerName
+        val asked = nameAsked
         p.edit().clear().putBoolean("migrated", true).apply()
         themeId = "classic"
+        playerName = name
+        nameAsked = asked
         lang = l
         vibration = v
         sound = s
