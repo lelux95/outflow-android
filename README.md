@@ -1,5 +1,7 @@
 # Outflow – Arrow Puzzle
 
+> Decisioni, regole, economia, stato e prossimi passi: vedi **[PROGETTO.md](PROGETTO.md)**.
+
 Puzzle casual per Android: libera tutte le frecce dalla figura. Ogni freccia esce solo
 nella direzione in cui punta e solo se la strada è libera. 10 tentativi per livello.
 
