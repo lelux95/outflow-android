@@ -2,18 +2,27 @@
 
 > Decisioni, regole, economia, stato e prossimi passi: vedi **[PROGETTO.md](PROGETTO.md)**.
 >
-> **Stato al 13/11/2026:** versione 0.5.0-alpha. Account Google Play Console attivo.
-> Prossima fase 0.6 (frecce più lunghe, voto S-F, tempo per livello, combo con fuochi d'artificio,
-> livelli-immagine, eventi con classifiche, Play Giochi, target API 36): vedi PROGETTO.md, sezioni 8–10.
+> **Stato al 13/11/2026:** versione 0.5.1-alpha (target API 36). Account Google Play Console attivo.
+> Fase 0.6 in corso (frecce più lunghe, voto S-F, tempo per livello, combo con fuochi d'artificio,
+> livelli-immagine, eventi con classifiche, Play Giochi): vedi PROGETTO.md, sezioni 8–10.
 
 Puzzle casual per Android: libera tutte le frecce dalla figura. Ogni freccia esce solo
-nella direzione in cui punta e solo se la strada è libera. 10 tentativi per livello.
+nella direzione in cui punta e solo se la strada è libera. 3 tentativi per livello.
 
-## Dove trovare l'APK
+## Dove trovare l'APK e il bundle per Google Play
 
-L'ultima build di prova è nel ramo [`build-output`](../../tree/build-output)
-(`Outflow.apk` + `build.log`). Tutte le build sono firmate con la stessa chiave:
-si installano una sopra l'altra senza perdere i progressi.
+L'ultima build è nel ramo [`build-output`](../../tree/build-output):
+- `Outflow.apk` + `build.log`: versione di prova, firmata con la chiave alpha. Tutte le alpha
+  si installano una sopra l'altra senza perdere i progressi.
+- `Outflow.aab` + `bundle.log`: bundle per Google Play, firmato con la chiave di upload
+  (prodotto solo se i secret `UPLOAD_*` sono configurati nel repository).
+
+## Versione alpha 0.5.1
+
+- Target API 36 (Android 16), Android Gradle Plugin 8.11.1, Gradle 8.13
+- Tasto indietro compatibile con Android 16 (OnBackInvokedCallback, gesto "indietro predittivo")
+- Bundle `.aab` firmato con la chiave di upload per Google Play
+- Livelli e progressi invariati
 
 ## Livelli
 

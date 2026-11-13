@@ -7,8 +7,8 @@ Va aggiornato a ogni nuova versione.
 - **App:** Outflow – Arrow Puzzle (nome di lavoro, sembra libero; marchio da verificare prima della pubblicazione)
 - **ID app:** `com.airis.outflow` (definitivo, non si può più cambiare dopo la pubblicazione)
 - **Repository:** `lelux95/outflow-android` (privato)
-- **Versione attuale:** 0.5.0-alpha (versionCode 5), 10 novembre 2026
-- **Ultimo aggiornamento di questo file:** 13 novembre 2026 (brief della fase 0.6 → sezione 8)
+- **Versione attuale:** 0.5.1-alpha (versionCode 6), 13 novembre 2026
+- **Ultimo aggiornamento di questo file:** 13 novembre 2026 (fase 0.6 avviata: punto 1 dell'ordine di lavoro)
 - **Tester principale:** il padre di Daniele (giocatore abituale di questo genere di giochi)
 - **Documento di progetto iniziale:** artifact "Outflow – Documento di progetto" su claude.ai
 
@@ -22,7 +22,14 @@ Va aggiornato a ogni nuova versione.
   e lo pubblica nel ramo `build-output` insieme a `build.log` e `info.txt` (con l'esito).
 - **Firma:** chiave `app/outflow.keystore` (password `outflow-alpha`), solo per le versioni di prova.
   Tutte le alpha si installano una sopra l'altra senza perdere dati.
-  **Per lo Store si userà la firma di Google Play (Play App Signing)**: la chiave alpha non va usata in produzione.
+  **Per lo Store si usa la firma di Google Play (Play App Signing)**: la chiave alpha non va usata in produzione.
+- **Chiave di upload (Store):** creata il 13/11/2026, **fuori dal repository** nella cartella
+  `chiave-upload-NON-CONDIVIDERE` sul PC di Daniele (va tenuta anche una copia di backup). Arriva al
+  workflow tramite i secret GitHub `UPLOAD_KEYSTORE_BASE64`, `UPLOAD_KEYSTORE_PASSWORD`, `UPLOAD_KEY_ALIAS`,
+  `UPLOAD_KEY_PASSWORD`. Con i secret presenti ogni push produce anche `Outflow.aab` (firmato con
+  questa chiave) nel ramo `build-output`. SHA-1 upload: `2B:65:1B:41:2E:D4:BF:63:23:CE:8E:02:94:0B:97:4C:DD:7B:8D:DB`.
+- **Attenzione:** l'app installata da Google Play ha una firma diversa da quella degli APK alpha: per
+  passare dall'una all'altra bisogna disinstallare (si perdono i progressi locali).
 - **Versioni:** a ogni rilascio aumentare `versionCode` e `versionName` in `app/build.gradle.kts`,
   aggiornare README e questo file.
 - **Modalità Tester:** visibile solo se `ALPHA = true` in `app/build.gradle.kts`. Per lo Store va messo `false`.
@@ -284,10 +291,10 @@ nella griglia livelli. Possibile premio monete extra per S.
 | --- | --- | --- |
 | Account sviluppatore | ✅ attivo | Intestato alla moglie di Daniele, personale |
 | Dichiarazione commerciante (DSA) | da fare | "Non commerciante" finché senza pubblicità |
-| **Target API 36 (Android 16)** | **da fare** | Obbligatorio per nuove app dal 31/08/2026; oggi l'app è a 35 |
-| App bundle (.aab) firmato | da fare | Play App Signing + nuova chiave di upload (non quella alpha) |
+| Target API 36 (Android 16) | fatto in 0.5.1, da verificare sul telefono | AGP 8.11.1, Gradle 8.13, tasto indietro con OnBackInvokedCallback |
+| App bundle (.aab) firmato | in corso | Chiave di upload creata; il workflow produce `Outflow.aab` quando ci sono i secret |
 | `ALPHA = false` | da fare | Toglie la modalità Tester |
-| Privacy policy (URL pubblico) | da fare | Obbligatoria; ospitarla su una pagina web |
+| Privacy policy (URL pubblico) | in corso | Testo pronto (IT/EN), da pubblicare su GitHub Pages |
 | Sicurezza dei dati (Data safety) | da fare | Oggi nessun dato raccolto; con Play Giochi e AdMob va aggiornata |
 | Classificazione contenuti (IARC) | da fare | Questionario in Play Console |
 | Pubblico di destinazione | da fare | Proposta: 13+ o "tutti" (evitare la sezione bambini) |
@@ -297,15 +304,30 @@ nella griglia livelli. Possibile premio monete extra per S.
 | Play Giochi | da fare | Vedi 8.8 |
 | Marchio "Outflow" | da verificare | TMview, classi 9 e 41 |
 
-## 10. Ordine di lavoro proposto (fase 0.6)
+### 8.9 Decisioni del 13/11/2026 (briefing)
+- **Voto S-F:** si **aggiunge** alle stelle (le stelle restano per sblocchi e monete). **Voto S = +5 monete.**
+- **Combo:** la finestra di 1,5 s si misura **da un tocco riuscito al successivo** (non dalla fine
+  dell'animazione, che con le frecce lunghe dura di più).
+- **Chiave di upload:** la crea Claude; va conservata **fuori dal repository** e caricata nei secret di GitHub.
+- **Privacy policy:** su **GitHub Pages**, in un repository pubblico separato (il repo dell'app è privato).
+- **Sfida del giorno:** si allinea al **reset di Play Giochi a mezzanotte del Pacifico** (ora di
+  Los Angeles, le 9:00 in Italia; le 8:00 o le 10:00 per pochi giorni l'anno quando l'ora legale non coincide).
+  La data della sfida e il seme si calcolano con quel fuso.
+- **Generatore unico:** il nuovo generatore delle frecce lunghe (8.3) nasce già con il supporto alle
+  **zone colorate** dei livelli-immagine (8.7), così si riscrive e si cambia salvataggio una volta sola.
+- I punteggi delle build con modalità Tester attiva **non vanno inviati** alle classifiche.
 
-1. Target API 36 e prima build `.aab` caricata in **test interno** (sblocca le impronte SHA-1 per Play Giochi).
-2. Frecce più lunghe (8.3) e freccia sbagliata permanente (8.6) → rigenerare i livelli.
-3. Tempo, voto S-F e combo con fuochi d'artificio (8.1, 8.2, 8.5).
-4. Play Giochi: accesso, salvataggio cloud, obiettivi, classifiche.
-5. Livelli-immagine (8.7) quando arrivano gli screen di riferimento.
-6. Eventi (8.4).
-7. Materiali Store, privacy policy, test chiuso.
+## 10. Ordine di lavoro (fase 0.6, rivisto e approvato il 13/11/2026)
+
+1. Target API 36, AGP aggiornato, tasto indietro compatibile con Android 16, chiave di upload,
+   prima build `.aab` in **test interno** (sblocca le impronte SHA-1 per Play Giochi).
+2. Privacy policy (GitHub Pages) e dichiarazioni in Play Console → **avvio del test chiuso**
+   (i 14 giorni scorrono mentre si sviluppano i punti seguenti).
+3. Nuovo generatore (frecce lunghe + zone), freccia sbagliata permanente, `outflow_v5` (8.3, 8.6).
+4. Tempo, voto S-F e combo (8.1, 8.2, 8.5) → versione 0.6 al padre per tarare il voto.
+5. Play Giochi: accesso, salvataggio cloud, obiettivi, classifiche (8.8).
+6. Livelli-immagine (8.7) con gli screen di riferimento (cartella `screen concorrenza`).
+7. Eventi (8.4).
 
 ---
 
@@ -318,3 +340,4 @@ nella griglia livelli. Possibile premio monete extra per S.
 | 0.3.0 | 10/11/2026 | Griglie più grandi, zoom, boss a tempo, negozio, temi, regalo giornaliero |
 | 0.4.0 | 10/11/2026 | Griglie piene, stili e scie, nome giocatore, profilo, vista intera |
 | 0.5.0 | 10/11/2026 | Negozio a sezioni, sfida del giorno, trofei, condivisione, backup |
+| 0.5.1 | 13/11/2026 | Target API 36, AGP 8.11.1, tasto indietro per Android 16, bundle .aab con chiave di upload |

@@ -1,6 +1,7 @@
-name: Compila APK
+name: Compila APK e AAB
 
-# Ogni push su main compila un APK di prova e lo pubblica nel ramo build-output
+# Ogni push su main compila un APK di prova (chiave alpha) e, se i secret della chiave di upload
+# sono configurati, anche il bundle .aab per Google Play. Tutto finisce nel ramo build-output.
 on:
   push:
     branches: [main]
@@ -16,6 +17,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      HAS_UPLOAD_KEY: ${{ secrets.UPLOAD_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,27 +29,46 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 build-tools;35.0.0'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.11.1'
+          gradle-version: '8.13'
 
-      - name: Compila
+      - name: Compila APK (chiave alpha)
         id: build
         continue-on-error: true
         run: |
           set -o pipefail
           gradle assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
 
-      - name: Pubblica APK e log sul ramo build-output
+      - name: Compila bundle per Google Play (.aab, chiave di upload)
+        id: bundle
+        if: steps.build.outcome == 'success' && env.HAS_UPLOAD_KEY == 'true'
+        continue-on-error: true
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          set -o pipefail
+          echo "$UPLOAD_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          export UPLOAD_KEYSTORE_FILE="$RUNNER_TEMP/upload.jks"
+          gradle bundleRelease -PplayUpload=true --no-daemon --stacktrace 2>&1 | tee bundle.log
+          rm -f "$RUNNER_TEMP/upload.jks"
+
+      - name: Pubblica APK, AAB e log sul ramo build-output
         if: always()
         run: |
           mkdir -p /tmp/out
           cp build.log /tmp/out/ || true
+          cp bundle.log /tmp/out/ 2>/dev/null || true
           cp app/build/outputs/apk/release/*.apk /tmp/out/Outflow.apk 2>/dev/null || true
+          cp app/build/outputs/bundle/release/*.aab /tmp/out/Outflow.aab 2>/dev/null || true
           echo "commit=${GITHUB_SHA}" > /tmp/out/info.txt
           echo "esito=${{ steps.build.outcome }}" >> /tmp/out/info.txt
+          echo "esito_aab=${{ steps.bundle.outcome || 'saltato (secret mancanti)' }}" >> /tmp/out/info.txt
           date -u >> /tmp/out/info.txt
           git config user.name "github-actions"
           git config user.email "actions@github.com"
@@ -58,5 +80,5 @@ jobs:
           for i in 1 2 3; do git push -f origin HEAD:build-output && break; sleep 5; done
 
       - name: Esito
-        if: steps.build.outcome != 'success'
+        if: steps.build.outcome != 'success' || steps.bundle.outcome == 'failure'
         run: exit 1

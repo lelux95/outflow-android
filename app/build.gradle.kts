@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "com.airis.outflow"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.airis.outflow"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 5
-        versionName = "0.5.0-alpha"
+        targetSdk = 36
+        versionCode = 6
+        versionName = "0.5.1-alpha"
         // true nelle versioni di prova: mostra la modalita' Tester. Per lo Store va messo a false.
         buildConfigField("boolean", "ALPHA", "true")
     }
@@ -21,8 +21,15 @@ android {
         buildConfig = true
     }
 
-    // Chiave unica per tutte le versioni di prova: si installano una sopra l'altra
-    // senza perdere i progressi. Per la pubblicazione sullo Store se ne creera' una nuova.
+    // Due chiavi:
+    // - "release": chiave alpha, unica per tutti gli APK di prova (si installano uno sopra l'altro).
+    // - "upload": chiave di caricamento per Google Play, usata SOLO per il bundle .aab.
+    //   Non e' nel repository: arriva dai secret di GitHub tramite variabili d'ambiente
+    //   (UPLOAD_KEYSTORE_FILE, UPLOAD_KEYSTORE_PASSWORD, UPLOAD_KEY_ALIAS, UPLOAD_KEY_PASSWORD).
+    //   Si attiva con: gradle bundleRelease -PplayUpload=true
+    val uploadKeystore = System.getenv("UPLOAD_KEYSTORE_FILE")
+    val usePlayUpload = (project.findProperty("playUpload") == "true") && !uploadKeystore.isNullOrBlank()
+
     signingConfigs {
         create("release") {
             storeFile = file("outflow.keystore")
@@ -30,12 +37,20 @@ android {
             keyAlias = "outflow"
             keyPassword = "outflow-alpha"
         }
+        if (usePlayUpload) {
+            create("upload") {
+                storeFile = file(uploadKeystore!!)
+                storePassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("UPLOAD_KEY_ALIAS")
+                keyPassword = System.getenv("UPLOAD_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName(if (usePlayUpload) "upload" else "release")
         }
     }
 

@@ -57,6 +57,7 @@ class MainActivity : Activity() {
         root = FrameLayout(this).apply { setBackgroundColor(Palette.BG) }
         setContentView(root)
         setupSystemBars()
+        setupBack()
 
         when {
             store.lang == null -> showLanguage()
@@ -1215,8 +1216,18 @@ class MainActivity : Activity() {
     }
 
     // ------------------------------------------------------------ tasto indietro
-    @Deprecated("Gestione semplice del tasto indietro")
-    override fun onBackPressed() {
+    // Da Android 13 si usa OnBackInvokedCallback: con targetSdk 36 (Android 16) il sistema
+    // non chiama piu' onBackPressed. Sulle versioni precedenti resta onBackPressed.
+    private fun setupBack() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT
+            ) { handleBack() }
+        }
+    }
+
+    /** Torna alla schermata precedente; dalla home (o dalla lingua) mette l'app in secondo piano. */
+    private fun handleBack() {
         when (screen) {
             Screen.GAME -> if (playingDaily) showMenu() else showLevels()
             Screen.STATS -> showSettings()
@@ -1224,10 +1235,13 @@ class MainActivity : Activity() {
             Screen.SHOP_SECTION -> showShop()
             Screen.TROPHIES -> showProfile()
             Screen.NAME -> { store.nameAsked = true; showMenu() }
-            Screen.MENU, Screen.LANGUAGE -> {
-                @Suppress("DEPRECATION")
-                super.onBackPressed()
-            }
+            // come il comportamento standard di Android: l'app va in secondo piano
+            Screen.MENU, Screen.LANGUAGE -> moveTaskToBack(true)
         }
+    }
+
+    @Deprecated("Usato solo fino ad Android 12")
+    override fun onBackPressed() {
+        handleBack()
     }
 }
