@@ -28,6 +28,9 @@ Va aggiornato a ogni nuova versione.
   workflow tramite i secret GitHub `UPLOAD_KEYSTORE_BASE64`, `UPLOAD_KEYSTORE_PASSWORD`, `UPLOAD_KEY_ALIAS`,
   `UPLOAD_KEY_PASSWORD`. Con i secret presenti ogni push produce anche `Outflow.aab` (firmato con
   questa chiave) nel ramo `build-output`. SHA-1 upload: `2B:65:1B:41:2E:D4:BF:63:23:CE:8E:02:94:0B:97:4C:DD:7B:8D:DB`.
+- **Chiave di firma di Google (Play App Signing):** attiva dal 13/11/2026. SHA-1 firma app:
+  `B5:35:9B:8F:51:14:29:2E:A5:1B:2C:0F:C9:DF:30:C4:93:FB:DD:8C` (in Play Console: Protetto con Play →
+  Protezione del Play Store → Firma dell'app). Per Play Giochi servono **entrambe** le SHA-1 (upload e firma app).
 - **Attenzione:** l'app installata da Google Play ha una firma diversa da quella degli APK alpha: per
   passare dall'una all'altra bisogna disinstallare (si perdono i progressi locali).
 - **Versioni:** a ogni rilascio aumentare `versionCode` e `versionName` in `app/build.gradle.kts`,
@@ -290,9 +293,11 @@ nella griglia livelli. Possibile premio monete extra per S.
 | Voce | Stato | Note |
 | --- | --- | --- |
 | Account sviluppatore | ✅ attivo | Intestato alla moglie di Daniele, personale |
+| App in Play Console | ✅ creata | `com.airis.outflow`, nome in Console "Outflow - Arrow Game" (da allineare con "Arrow Puzzle"?) |
+| Test interno | ✅ 0.5.1 (vc 6) caricata | Play App Signing attivo; avviso "file di deoffuscamento" ignorato (R8 non usato) |
 | Dichiarazione commerciante (DSA) | da fare | "Non commerciante" finché senza pubblicità |
 | Target API 36 (Android 16) | fatto in 0.5.1, da verificare sul telefono | AGP 8.11.1, Gradle 8.13, tasto indietro con OnBackInvokedCallback |
-| App bundle (.aab) firmato | in corso | Chiave di upload creata; il workflow produce `Outflow.aab` quando ci sono i secret |
+| App bundle (.aab) firmato | ✅ | Chiave di upload creata; il workflow produce `Outflow.aab` quando ci sono i secret |
 | `ALPHA = false` | da fare | Toglie la modalità Tester |
 | Privacy policy (URL pubblico) | in corso | Testo pronto (IT/EN), da pubblicare su GitHub Pages |
 | Sicurezza dei dati (Data safety) | da fare | Oggi nessun dato raccolto; con Play Giochi e AdMob va aggiornata |
