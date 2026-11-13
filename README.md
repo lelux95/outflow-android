@@ -2,7 +2,7 @@
 
 > Decisioni, regole, economia, stato e prossimi passi: vedi **[PROGETTO.md](PROGETTO.md)**.
 >
-> **Stato al 13/11/2026:** versione 0.5.1-alpha (target API 36). Account Google Play Console attivo.
+> **Stato al 13/11/2026:** versione 0.6.0-alpha (250 livelli, target API 36). Account Google Play Console attivo.
 > Fase 0.6 in corso (frecce più lunghe, voto S-F, tempo per livello, combo con fuochi d'artificio,
 > livelli-immagine, eventi con classifiche, Play Giochi): vedi PROGETTO.md, sezioni 8–10.
 
@@ -16,6 +16,19 @@ L'ultima build è nel ramo [`build-output`](../../tree/build-output):
   si installano una sopra l'altra senza perdere i progressi.
 - `Outflow.aab` + `bundle.log`: bundle per Google Play, firmato con la chiave di upload
   (prodotto solo se i secret `UPLOAD_*` sono configurati nel repository).
+
+## Versione alpha 0.6.0
+
+- **250 livelli nuovi**: frecce molto più lunghe (fino a 30 caselle), curve, U e spirali;
+  griglie che crescono fino a 26×36 al livello 40 e 28×40 alla fine
+- Nuovo generatore "a buccia di cipolla" (`tools/generate_levels.py`): griglia piena al 100%,
+  ogni livello risolvibile per costruzione e verificato dal risolutore
+- **Boss a sagoma**: ogni boss disegna un'immagine (goccia, mela, abete, fungo, fiamma, razzo, gatto…),
+  25 sagome in `tools/silhouettes.py`
+- Stile **Linea** (tinta unica, sottile) predefinito; **Facile da vedere** (una freccia un colore) gratuito nel negozio
+- La freccia toccata quando è bloccata **resta rossa** finché non viene liberata
+- Fascia di difficoltà sotto il titolo (Facile, Medio, Difficile, Esperto)
+- Nuovo salvataggio `outflow_v5`: progressi e monete ripartono da zero (restano lingua, nome e impostazioni)
 
 ## Versione alpha 0.5.1
 

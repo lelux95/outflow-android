@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Backup automatico su Google Drive (Android 6-11): salva solo i progressi del gioco. -->
 <full-backup-content>
-    <include domain="sharedpref" path="outflow_v4.xml" />
+    <include domain="sharedpref" path="outflow_v5.xml" />
 </full-backup-content>

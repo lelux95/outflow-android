@@ -2,9 +2,9 @@
 <!-- Android 12+: progressi salvati nel backup cloud e copiati nel passaggio a un nuovo telefono. -->
 <data-extraction-rules>
     <cloud-backup>
-        <include domain="sharedpref" path="outflow_v4.xml" />
+        <include domain="sharedpref" path="outflow_v5.xml" />
     </cloud-backup>
     <device-transfer>
-        <include domain="sharedpref" path="outflow_v4.xml" />
+        <include domain="sharedpref" path="outflow_v5.xml" />
     </device-transfer>
 </data-extraction-rules>

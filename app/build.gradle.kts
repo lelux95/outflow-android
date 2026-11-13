@@ -11,8 +11,8 @@ android {
         applicationId = "com.airis.outflow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.1-alpha"
+        versionCode = 7
+        versionName = "0.6.0-alpha"
         // true nelle versioni di prova: mostra la modalita' Tester. Per lo Store va messo a false.
         buildConfigField("boolean", "ALPHA", "true")
     }

@@ -11,8 +11,22 @@ class Arrow(val xs: IntArray, val ys: IntArray, val dir: Int) {
     val headY: Int get() = ys[ys.size - 1]
 }
 
-/** time > 0 = livello a tempo (boss), in secondi. */
-class Level(val id: Int, val shape: String, val w: Int, val h: Int, val boss: Boolean, val time: Int, val arrows: List<Arrow>)
+/**
+ * time > 0 = livello a tempo (boss), in secondi. difficulty = indice calcolato dal generatore.
+ * nameIt/nameEn = nome della sagoma nei livelli boss (es. "Fiamma").
+ */
+class Level(val id: Int, val shape: String, val w: Int, val h: Int, val boss: Boolean, val time: Int, val arrows: List<Arrow>,
+            val difficulty: Double = 0.0, val nameIt: String = "", val nameEn: String = "") {
+    val name: String get() = if (S.lang == "it") nameIt else nameEn
+
+    /** Fascia di difficolta' mostrata sotto il titolo: 0 facile, 1 medio, 2 difficile, 3 esperto. */
+    val tier: Int get() = when {
+        difficulty < 12 -> 0
+        difficulty < 18 -> 1
+        difficulty < 26 -> 2
+        else -> 3
+    }
+}
 
 object Levels {
     @Volatile private var cache: List<Level>? = null
@@ -35,7 +49,8 @@ object Levels {
                 arrows.add(Arrow(xs, ys, ao.getInt("d")))
             }
             list.add(Level(o.getInt("id"), o.getString("shape"), o.getInt("w"), o.getInt("h"),
-                o.optBoolean("boss", false), o.optInt("time", 0), arrows))
+                o.optBoolean("boss", false), o.optInt("time", 0), arrows,
+                o.optDouble("difficulty", 0.0), o.optString("name", ""), o.optString("name_en", "")))
         }
         cache = list
         return list
@@ -87,15 +102,15 @@ enum class Item(val key: String, val price: Int, val qty: Int) {
 /** Statistiche di una partita, registrate per la modalita' Tester. */
 class PlayStat(val plays: Int, val wins: Int, val bestStars: Int, val lastMs: Long, val lastErrors: Int, val extrasBought: Int)
 
-/** Salvataggio locale. "outflow_v4": livelli nuovi, si riparte da zero (restano lingua e impostazioni). */
+/** Salvataggio locale. "outflow_v5": 250 livelli nuovi (0.6), si riparte da zero (restano lingua e impostazioni). */
 class Store(ctx: Context) {
-    private val p = ctx.getSharedPreferences("outflow_v4", Context.MODE_PRIVATE)
+    private val p = ctx.getSharedPreferences("outflow_v5", Context.MODE_PRIVATE)
 
     init {
         // porta con se' solo lingua e vibrazione dalla versione precedente
         if (!p.contains("migrated")) {
             val e = p.edit().putBoolean("migrated", true)
-            for (name in listOf("outflow_v3", "outflow_v2", "outflow")) {
+            for (name in listOf("outflow_v4", "outflow_v3", "outflow_v2", "outflow")) {
                 val old = ctx.getSharedPreferences(name, Context.MODE_PRIVATE)
                 val lang = old.getString("lang", null) ?: continue
                 e.putString("lang", lang)
@@ -158,7 +173,7 @@ class Store(ctx: Context) {
         set(v) { p.edit().putBoolean("name_asked", v).apply() }
 
     var styleId: String
-        get() = p.getString("style", "classic") ?: "classic"
+        get() = p.getString("style", "line") ?: "line"
         set(v) { p.edit().putString("style", v).apply() }
 
     var trailId: String

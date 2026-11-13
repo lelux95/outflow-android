@@ -39,8 +39,8 @@ class GameView(context: Context) : View(context) {
     var vibrate = true
 
     /** Stile delle frecce e scia d'uscita scelti nel negozio. */
-    var style = ArrowStyle.CLASSIC
-        set(v) { field = v; configureStyle(); invalidate() }
+    var style = ArrowStyle.LINE
+        set(v) { field = v; recolor(); configureStyle(); invalidate() }
     var trail = Trail.NONE
 
     /** Modalita' anteprima (negozio): al tocco la freccia esce e poi ricompare. */
@@ -70,6 +70,7 @@ class GameView(context: Context) : View(context) {
     private var alive = BooleanArray(0)
     private var occ = IntArray(0)          // cella -> indice freccia, -1 libera
     private var colors = IntArray(0)
+    private var wrong = BooleanArray(0)     // frecce toccate quando erano bloccate: restano segnate
     private var paths: Array<FloatArray> = emptyArray() // per freccia: x0,y0,x1,y1,... in celle
     private var finished = false
 
@@ -138,7 +139,8 @@ class GameView(context: Context) : View(context) {
         arrows = l.arrows
         alive = BooleanArray(arrows.size) { true }
         occ = IntArray(l.w * l.h) { -1 }
-        colors = IntArray(arrows.size) { Palette.ARROWS[it % Palette.ARROWS.size] }
+        recolor()
+        wrong = BooleanArray(arrows.size)
         paths = Array(arrows.size) { buildPath(arrows[it]) }
         for ((i, a) in arrows.withIndex()) for (k in 0 until a.size) occ[a.ys[k] * l.w + a.xs[k]] = i
         attempts = Rules.MAX_ATTEMPTS
@@ -152,6 +154,12 @@ class GameView(context: Context) : View(context) {
         z = 1f; panX = 0f; panY = 0f
         relayout()
         invalidate()
+    }
+
+    /** Colori delle frecce: uno per freccia con "Facile da vedere", altrimenti tinta unica. */
+    private fun recolor() {
+        val mono = Palette.tint(Palette.INK, 0.78f)
+        colors = IntArray(arrows.size) { if (style.colorful) Palette.ARROWS[it % Palette.ARROWS.size] else mono }
     }
 
     /** Aggiunge un tentativo (tentativo extra comprato) e riprende la partita da dove era. */
@@ -393,6 +401,7 @@ class GameView(context: Context) : View(context) {
         } else {
             attempts--
             errors++
+            wrong[i] = true
             shakeIdx = i; shakeStart = now
             blockIdx = b; blockStart = now
             buzz()
@@ -428,7 +437,8 @@ class GameView(context: Context) : View(context) {
         for (i in arrows.indices) {
             if (!alive[i]) continue
             var dx = 0f
-            var color = colors[i]
+            // una freccia sbagliata resta rossa finche' non viene liberata
+            var color = if (wrong[i]) Palette.ERROR else colors[i]
             var widthMul = 1f
             if (i == shakeIdx) {
                 val t = (now - shakeStart) / 400f
@@ -443,7 +453,7 @@ class GameView(context: Context) : View(context) {
                 if (t < 1f) {
                     val pulse = abs(sin(t * PI * 3)).toFloat()
                     widthMul = 1f + 0.45f * pulse
-                    color = Palette.INK
+                    color = if (style.colorful) Palette.INK else Palette.ACCENT
                     animating = true
                 } else blockIdx = -1
             }
@@ -526,9 +536,14 @@ class GameView(context: Context) : View(context) {
         }
         head.color = color
         when (style) {
-            ArrowStyle.CLASSIC -> {
+            ArrowStyle.LINE -> {
                 stroke.color = color
-                stroke.strokeWidth = cell * 0.12f * widthMul
+                stroke.strokeWidth = cell * 0.11f * widthMul
+                c.drawPath(body, stroke)
+            }
+            ArrowStyle.EASY -> {
+                stroke.color = color
+                stroke.strokeWidth = cell * 0.16f * widthMul
                 c.drawPath(body, stroke)
             }
             ArrowStyle.MARKER -> {

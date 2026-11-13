@@ -403,6 +403,7 @@ class MainActivity : Activity() {
             letterSpacing = 0.2f
         }, 0f)
         col.addWrap(text(S.t("boss_title"), 34f, bold = true, color = Palette.BOSS), 18f)
+        if (lv.name.isNotEmpty()) col.addWrap(text(lv.name, 22f, bold = true, color = Palette.INK), 6f)
         col.addWrap(text(S.f("boss_sub", lv.id, lv.arrows.size), 16f, color = Palette.QUIET), 8f)
         col.addWrap(text("⏱ ${fmtTime(lv.time * 1000L)}", 30f, bold = true, color = Palette.BOSS), 16f)
         col.addFull(button(S.t("start"), primary = true, fill = Palette.BOSS) { showGame(lv) }, 36f)
@@ -508,6 +509,19 @@ class MainActivity : Activity() {
             else -> S.f("level", id)
         }
         col.addFull(topBar(title, { if (daily) showMenu() else showLevels() }, heartsLabel), 0f)
+        // sotto il titolo: fascia di difficolta' (o il nome della sagoma per i boss)
+        if (!daily) {
+            val (sub, subColor) = when {
+                lv.boss -> (if (lv.name.isNotEmpty()) lv.name else S.t("boss_title")) to Palette.BOSS
+                else -> S.t("tier${lv.tier}") to when (lv.tier) {
+                    0 -> Palette.PRIMARY
+                    1 -> Palette.STAR
+                    2 -> Palette.ACCENT
+                    else -> Palette.BOSS
+                }
+            }
+            col.addWrap(text(sub, 13f, bold = true, color = subColor), 0f)
+        }
 
         val timeLabel = text("", 24f, bold = true, color = Palette.BOSS)
         if (lv.time > 0 || daily) col.addWrap(timeLabel, 0f)
@@ -895,14 +909,15 @@ class MainActivity : Activity() {
             col.addFull(row, 10f)
         }
 
-        // anteprima: una freccia a L che si puo' toccare per vederla uscire
+        // anteprima: due frecce che si possono toccare per vederle uscire (con "Facile da vedere" hanno colori diversi)
         fun preview(style: ArrowStyle, trail: Trail): GameView = GameView(this).apply {
             previewMode = true
             vibrate = false
             this.style = style
             this.trail = trail
             setLevel(Level(0, "square", 4, 3, false, 0,
-                listOf(Arrow(intArrayOf(0, 1, 2, 2), intArrayOf(2, 2, 2, 1), 0))))
+                listOf(Arrow(intArrayOf(0, 1, 2, 2), intArrayOf(2, 2, 2, 1), 0),
+                    Arrow(intArrayOf(3, 3, 3), intArrayOf(2, 1, 0), 0))))
         }
 
         fun cosmeticRow(

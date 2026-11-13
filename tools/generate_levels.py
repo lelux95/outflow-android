@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
-"""Generatore e risolutore dei livelli di Outflow (v2: frecce a serpente).
+"""Generatore e risolutore dei livelli di Outflow (v3: frecce lunghe, spirali, sagome).
 
-Ogni freccia e' una catena di celle adiacenti, dalla coda alla punta, lunga 1-7.
-La punta guarda nella direzione dell'ultimo tratto (per le frecce da 1 cella: "d").
-Una freccia esce se tutte le celle davanti alla punta, fino al bordo, sono libere;
-poi scivola via seguendo il proprio percorso.
+Regole: ogni freccia e' una catena di celle adiacenti (coda -> punta). La punta guarda nella
+direzione dell'ultimo tratto. Una freccia esce se tutte le celle davanti alla punta, fino al
+bordo, sono libere (anche dal proprio corpo); poi scivola via seguendo il proprio percorso.
 
-Garanzia di risolvibilita': le frecce vengono piazzate una alla volta e ciascuna,
-quando viene piazzata, ha la strada davanti alla punta libera da tutte le frecce
-gia' presenti (e dal proprio corpo). Togliendole in ordine inverso il livello si
-risolve sempre. Il risolutore lo ricontrolla per ogni livello.
+Metodo "a buccia di cipolla": le frecce vengono create NELL'ORDINE IN CUI SI TOLGONO.
+La freccia numero k deve avere davanti alla punta solo celle gia' assegnate alle frecce 1..k-1
+(che escono prima di lei) o celle vuote. Le celle ancora libere che soddisfano questa regola
+sono esattamente le "estreme" di ogni riga e colonna (la piu' in alto della colonna verso l'alto,
+la piu' a sinistra della riga verso sinistra, ecc.): ce n'e' sempre almeno una, quindi la griglia
+si riempie al 100%. Il corpo invece puo' serpeggiare liberamente dentro la parte non ancora
+assegnata: frecce lunghe, spirali e incastri senza doverle spezzare.
+Il risolutore ricontrolla comunque ogni livello.
 
-Uso:  python3 tools/generate_levels.py  ->  app/src/main/assets/levels.json
+Uso:  python tools/generate_levels.py  ->  app/src/main/assets/levels.json
 """
 import json
 import math
@@ -19,11 +22,16 @@ import os
 import random
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from silhouettes import SIL, BOSS_ORDER, silhouette_mask  # noqa: E402
+
 DIRS = [(0, -1), (1, 0), (0, 1), (-1, 0)]  # 0 su, 1 destra, 2 giu', 3 sinistra
-LEVEL_COUNT = 100
+LEVEL_COUNT = 250
+SEED = 20261113
+FORMAT_VERSION = 5
 
 
-# ---------------------------------------------------------------- forme
+# ---------------------------------------------------------------- forme geometriche (livelli normali)
 def inside(shape, u, v):
     if shape == "square":
         return True
@@ -47,9 +55,9 @@ def inside(shape, u, v):
     if shape == "ring":
         r = u * u + v * v
         return 0.16 <= r <= 1.08
-    if shape == "arrow":  # una freccia verso l'alto
+    if shape == "arrow":
         return (v >= 0 and abs(u) <= (1 - v) * 0.95 + 0.05) or (v < 0 and abs(u) <= 0.38)
-    if shape == "cross":  # una X
+    if shape == "cross":
         return abs(abs(u) - abs(v)) <= 0.42
     if shape == "house":
         return (v <= 0.15 and abs(u) <= 0.82) or (v > 0.15 and abs(u) <= (1 - v) * 1.0 + 0.05)
@@ -57,6 +65,8 @@ def inside(shape, u, v):
 
 
 def shape_mask(shape, w, h):
+    if shape.startswith("sil:"):
+        return silhouette_mask(shape[4:], w, h)
     cells = set()
     for y in range(h):
         for x in range(w):
@@ -83,329 +93,6 @@ def head_dir(cells, d):
     return d
 
 
-class Params:
-    def __init__(self, max_len, turn_p, zigzag, min_len=1, greed=1, hot=0.7, edge_short=2, fill_min=1):
-        self.max_len = max_len      # lunghezza massima delle frecce
-        self.turn_p = turn_p        # probabilita' di curvare a ogni passo
-        self.zigzag = zigzag        # ammesse piu' curve (zig-zag, S)
-        self.min_len = min_len
-        self.greed = greed          # quante proposte confrontare a ogni passo (piu' alto = piu' incastri)
-        self.hot = hot              # probabilita' di partire sulla traiettoria di un'altra freccia
-        self.edge_short = edge_short  # frecce lunghe fino a questo valore non possono puntare fuori dal bordo
-        self.fill_min = fill_min    # lunghezza minima nel riempimento finale
-
-
-def generate(mask, w, h, p, rng):
-    """Piazza una freccia alla volta. A ogni passo confronta p.greed proposte e tiene quella
-    che blocca piu' traiettorie gia' esistenti: cosi' le frecce si incastrano tra loro."""
-    occ = {}            # cella -> indice freccia
-    arrows = []         # (celle coda->punta, d)
-    ray_owner = {}      # cella -> quante frecce gia' piazzate la attraversano con la traiettoria
-
-    def free(c):
-        return c in mask and c not in occ
-
-    def ray_clear(head, d, own):
-        return all(c not in occ and c not in own for c in ray(head, d, w, h))
-
-    def walk(start, target):
-        cells, steps = [start], []
-        used = {start}
-        cur = rng.randrange(4)
-        turns = 0
-        while len(cells) < target:
-            cand = [cur]
-            if steps and (p.zigzag or turns == 0) and rng.random() < p.turn_p:
-                t = [(cur + 1) % 4, (cur + 3) % 4]
-                rng.shuffle(t)
-                cand = t + [cur]
-            elif not steps:
-                cand = [cur, (cur + 1) % 4, (cur + 3) % 4, (cur + 2) % 4]
-            moved = False
-            for nd in cand:
-                nxt = (cells[-1][0] + DIRS[nd][0], cells[-1][1] + DIRS[nd][1])
-                if free(nxt) and nxt not in used:
-                    if steps and nd != cur:
-                        turns += 1
-                    cur = nd
-                    cells.append(nxt)
-                    steps.append(nd)
-                    used.add(nxt)
-                    moved = True
-                    break
-            if not moved:
-                break
-        return cells, steps
-
-    def propose(start, min_len):
-        target = rng.randint(min_len, p.max_len)
-        cells, steps = walk(start, target)
-        for n in range(len(cells), 0, -1):
-            if n < min_len:
-                break
-            part = cells[:n]
-            own = set(part)
-            if n >= 2:
-                options = [steps[n - 2]]
-            else:
-                options = sorted(range(4), key=lambda dd: -sum(1 for c in ray(part[-1], dd, w, h) if c in mask) - rng.random())
-            for d in options:
-                hx, hy = part[-1]
-                nx, ny = hx + DIRS[d][0], hy + DIRS[d][1]
-                on_edge_out = not (0 <= nx < w and 0 <= ny < h)
-                if on_edge_out and n <= p.edge_short:
-                    continue  # freccia corta sul bordo verso l'esterno: troppo facile
-                if ray_clear(part[-1], d, own):
-                    return part, d
-        return None
-
-    ray_max = {}        # cella -> indice piu' alto tra le frecce la cui strada passa di li'
-    unblocked = set()   # frecce la cui strada e' ancora tutta vuota
-    watch = {}          # cella -> frecce non bloccate la cui strada passa di li'
-
-    def place(part, d):
-        idx = len(arrows)
-        arrows.append((part, d))
-        for c in part:
-            occ[c] = idx
-            for j in watch.pop(c, ()):
-                unblocked.discard(j)
-        cells_ahead = [c for c in ray(part[-1], d, w, h) if c in mask and c not in occ]
-        for c in ray(part[-1], d, w, h):
-            ray_owner[c] = ray_owner.get(c, 0) + 1
-            ray_max[c] = max(ray_max.get(c, -1), idx)
-        if cells_ahead:
-            unblocked.add(idx)
-            for c in cells_ahead:
-                watch.setdefault(c, set()).add(idx)
-
-    def gain(part):
-        hit = set()
-        for c in part:
-            for j in watch.get(c, ()):
-                if j in unblocked:
-                    hit.add(j)
-        return len(hit)
-
-    misses = 0
-    while misses < 8:
-        empty = [c for c in mask if c not in occ]
-        if not empty:
-            break
-        best, best_score = None, None
-        hot = [c for c in empty if watch.get(c)]
-        for _ in range(p.greed):
-            # partenza preferita sulla strada di una freccia ancora libera (per bloccarla)
-            start = rng.choice(hot) if hot and rng.random() < p.hot else rng.choice(empty)
-            prop = propose(start, p.min_len)
-            if prop is None:
-                continue
-            part, d = prop
-            reach = sum(1 for c in ray(part[-1], d, w, h) if c in mask and c not in occ)
-            if reach == 0 and len(arrows) > 2:
-                continue  # resterebbe libera per sempre
-            sc = gain(part) * 5 + min(reach, 6) * 0.6 + len(part) * 0.3 + rng.random()
-            if best is None or sc > best_score:
-                best, best_score = prop, sc
-        if best is None:
-            misses += 1
-            continue
-        misses = 0
-        place(*best)
-    # riempimento a crescita: le code delle frecce si allungano dentro i buchi.
-    # Una coda puo' entrare nella cella c solo se c non sta sulla strada di una freccia
-    # piazzata dopo (che uscirebbe prima e resterebbe bloccata) ne' sulla propria strada.
-    cap = p.max_len + 1
-
-    def grow():
-        changed = True
-        while changed:
-            changed = False
-            for c in sorted((c for c in mask if c not in occ), key=lambda _: rng.random()):
-                opts = []
-                for dx, dy in DIRS:
-                    nb = (c[0] + dx, c[1] + dy)
-                    i = occ.get(nb)
-                    if i is None:
-                        continue
-                    cells, d = arrows[i]
-                    if len(cells) == 1 and (nb[0] - c[0], nb[1] - c[1]) != DIRS[d]:
-                        continue  # una freccia da 1 cresce solo all'indietro (la punta non cambia verso)
-                    if cells[0] == nb and len(cells) < cap and ray_max.get(c, -1) < i:
-                        opts.append((len(cells) + rng.random(), i))
-                if opts:
-                    opts.sort()
-                    i = opts[0][1]  # allunga la freccia piu' corta
-                    arrows[i][0].insert(0, c)
-                    occ[c] = i
-                    changed = True
-
-    for _ in range(3):
-        grow()
-        for c in sorted(mask, key=lambda _: rng.random()):
-            if c not in occ:
-                prop = propose(c, 2) or propose(c, p.fill_min)
-                if prop:
-                    place(*prop)
-    grow()
-    return arrows
-
-
-def generate_dense(mask, w, h, p, rng):
-    """Griglia piena al 100%: prima copre tutte le celle con frecce (cammini casuali),
-    poi ripara i blocchi senza uscita girando o spezzando le frecce coinvolte."""
-    occ = {}
-    paths = []
-    order = sorted(mask, key=lambda _: rng.random())
-    for start in order:
-        if start in occ:
-            continue
-        target = rng.randint(p.min_len, p.max_len)
-        cells = [start]
-        occ[start] = len(paths)
-        cur = rng.randrange(4)
-        turns = 0
-        while len(cells) < target:
-            cand = [cur]
-            if len(cells) > 1 and (p.zigzag or turns == 0) and rng.random() < p.turn_p:
-                t = [(cur + 1) % 4, (cur + 3) % 4]
-                rng.shuffle(t)
-                cand = t + [cur]
-            elif len(cells) == 1:
-                cand = rng.sample(range(4), 4)
-            moved = False
-            for nd in cand:
-                nxt = (cells[-1][0] + DIRS[nd][0], cells[-1][1] + DIRS[nd][1])
-                if nxt in mask and nxt not in occ:
-                    if len(cells) > 1 and nd != cur:
-                        turns += 1
-                    cur = nd
-                    cells.append(nxt)
-                    occ[nxt] = len(paths)
-                    moved = True
-                    break
-            if not moved:
-                break
-        paths.append(cells)
-
-    # le frecce da 1 casella si uniscono a un vicino quando possibile (estremo libero)
-    def merge_singles():
-        changed = True
-        while changed:
-            changed = False
-            for i, cells in enumerate(paths):
-                if len(cells) != 1:
-                    continue
-                c = cells[0]
-                for dx, dy in rng.sample(DIRS, 4):
-                    nb = (c[0] + dx, c[1] + dy)
-                    j = occ.get(nb)
-                    if j is None or j == i or len(paths[j]) >= p.max_len + 1 or not paths[j]:
-                        continue
-                    if paths[j][0] == nb:
-                        paths[j].insert(0, c)
-                    elif paths[j][-1] == nb:
-                        paths[j].append(c)
-                    else:
-                        continue
-                    occ[c] = j
-                    paths[i] = []
-                    changed = True
-                    break
-    merge_singles()
-    arrows = []
-    for cells in paths:
-        if not cells:
-            continue
-        if len(cells) >= 2 and rng.random() < 0.5:
-            cells = list(reversed(cells))
-        d = head_dir(cells, rng.randrange(4))
-        arrows.append([cells, d])
-
-    def is_edge_out(cells, d):
-        hx, hy = cells[-1]
-        nx, ny = hx + DIRS[d][0], hy + DIRS[d][1]
-        return not (0 <= nx < w and 0 <= ny < h)
-
-    # orienta le frecce corte verso l'interno quando sul bordo
-    for a in arrows:
-        if len(a[0]) <= p.edge_short and is_edge_out(a[0], a[1]):
-            if len(a[0]) >= 2:
-                a[0] = list(reversed(a[0]))
-                a[1] = head_dir(a[0], 0)
-            else:
-                a[1] = (a[1] + 2) % 4
-
-    # riparazione: simula l'uscita; quando nessuna freccia puo' uscire, ne gira o spezza una
-    for _ in range(4000):
-        occ = {}
-        for i, (cells, d) in enumerate(arrows):
-            for c in cells:
-                occ[c] = i
-        alive = set(range(len(arrows)))
-        while True:
-            free = [i for i in alive if all(occ.get(c, -1) == -1 for c in ray(arrows[i][0][-1], arrows[i][1], w, h))]
-            if not free:
-                break
-            for i in free:
-                alive.discard(i)
-                for c in arrows[i][0]:
-                    occ.pop(c, None)
-        if not alive:
-            return [(cells, d) for cells, d in arrows]
-        stuck = list(alive)
-        rng.shuffle(stuck)
-        fixed = False
-        # 1) girare una freccia bloccata (la punta passa all'altra estremita')
-        for i in stuck:
-            cells, d = arrows[i]
-            if len(cells) >= 2:
-                rc = list(reversed(cells))
-                rd = head_dir(rc, 0)
-            else:
-                continue
-            own = set(cells)
-            if all((occ.get(c, -1) == -1) for c in ray(rc[-1], rd, w, h)):
-                arrows[i] = [rc, rd]
-                fixed = True
-                break
-        if fixed:
-            continue
-        # 2) freccia da 1 casella: un'altra direzione libera
-        for i in stuck:
-            cells, d = arrows[i]
-            if len(cells) == 1:
-                for nd in rng.sample(range(4), 4):
-                    if all(occ.get(c, -1) == -1 for c in ray(cells[0], nd, w, h)):
-                        arrows[i] = [cells, nd]
-                        fixed = True
-                        break
-            if fixed:
-                break
-        if fixed:
-            continue
-        # 3) spezza: la cella rimasta piu' in alto (o in un altro estremo) ha sempre la strada libera
-        side = rng.randrange(4)
-        key = [lambda c: c[1], lambda c: -c[0], lambda c: -c[1], lambda c: c[0]][side]
-        cell = min((c for c, i in occ.items()), key=lambda c: (key(c), rng.random()))
-        i = occ[cell]
-        cells, d = arrows[i]
-        k = cells.index(cell)
-        before, after = cells[:k], cells[k + 1:]
-        # la parte che contiene la cella diventa la punta, verso il lato libero
-        if k >= 1 and head_dir(cells[:k + 1], 0) == side:
-            arrows[i] = [cells[:k + 1], side]
-            if after:
-                arrows.append([after, head_dir(after, d) if len(after) >= 2 else d])
-        else:
-            arrows[i] = [[cell], side]
-            if before:
-                arrows.append([before, head_dir(before, 0) if len(before) >= 2 else head_dir(cells[:k + 1], 0)])
-            if after:
-                arrows.append([after, head_dir(after, d) if len(after) >= 2 else d])
-    raise RuntimeError("riparazione non riuscita")
-
-
 def solve(arrows, w, h):
     """Toglie a ondate le frecce libere. Restituisce (risolto, ondate, libere_iniziali)."""
     alive = set(range(len(arrows)))
@@ -415,12 +102,8 @@ def solve(arrows, w, h):
             occ[c] = i
     waves, first_free = 0, None
     while alive:
-        free = []
-        for i in alive:
-            cells, d = arrows[i]
-            hd = head_dir(cells, d)
-            if all(occ.get(c, -1) == -1 for c in ray(cells[-1], hd, w, h)):
-                free.append(i)
+        free = [i for i in alive
+                if all(c not in occ for c in ray(arrows[i][0][-1], head_dir(*arrows[i]), w, h))]
         if first_free is None:
             first_free = len(free)
         if not free:
@@ -433,64 +116,205 @@ def solve(arrows, w, h):
     return True, waves, first_free or 0
 
 
-def score(arrows, w, h, mask):
-    ok, waves, free = solve(arrows, w, h)
-    if not ok:
-        return None
-    n = len(arrows)
-    cells = sum(len(c) for c, _ in arrows)
-    blocked = 1 - free / n
-    avg_len = cells / n
-    return waves * 1.0 + blocked * 4 + avg_len * 0.8
+# ---------------------------------------------------------------- generatore
+class Params:
+    def __init__(self, max_len, p_short, turn_p, spiral_p, straight_p, hard):
+        self.max_len = max_len        # lunghezza massima delle frecce
+        self.p_short = p_short        # quota di frecce corte (2-4)
+        self.turn_p = turn_p          # probabilita' di curvare a ogni passo (cammino libero)
+        self.spiral_p = spiral_p      # probabilita' che una freccia si avvolga a spirale
+        self.straight_p = straight_p  # probabilita' di una freccia lunga e dritta
+        self.hard = hard              # quanto preferire punte bloccate da molte frecce
 
 
-# ---------------------------------------------------------------- piano
-SHAPES_EARLY = ["square", "diamond", "plus", "circle"]
-SHAPES_MID = ["square", "circle", "heart", "hourglass", "diamond", "triangle", "plus", "arrow"]
-SHAPES_LATE = ["square", "circle", "heart", "star", "ring", "hourglass", "triangle", "house", "cross", "arrow", "diamond", "plus"]
+def pick_length(p, rng):
+    r = rng.random()
+    if r < p.p_short:
+        return rng.randint(2, 4)
+    if r < p.p_short + 0.45:
+        return rng.randint(4, max(5, p.max_len // 2))
+    return rng.randint(max(5, p.max_len // 2), max(6, p.max_len))
 
 
+def generate(mask, w, h, p, rng):
+    owner = {}       # cella -> indice freccia (ordine di uscita)
+    arrows = []      # [celle coda->punta, direzione]
+    depth = []      # ondata minima in cui la freccia puo' uscire
+    free_cells = set(mask)
+
+    def is_free(c):
+        return c in free_cells
+
+    def frontier():
+        """Celle libere con la strada gia' sgombra in una direzione: (cella, direzione)."""
+        out = []
+        cols, rows = {}, {}
+        for (x, y) in free_cells:
+            cols.setdefault(x, []).append(y)
+            rows.setdefault(y, []).append(x)
+        for x, ys in cols.items():
+            out.append(((x, min(ys)), 0))
+            out.append(((x, max(ys)), 2))
+        for y, xs in rows.items():
+            out.append(((max(xs), y), 1))
+            out.append(((min(xs), y), 3))
+        return out
+
+    def walk(head, d, target):
+        """Costruisce il corpo partendo dalla punta e andando all'indietro."""
+        prev = (head[0] - DIRS[d][0], head[1] - DIRS[d][1])
+        if not is_free(prev):
+            return [head]
+        path = [head, prev]
+        used = {head, prev}
+        cur = (d + 2) % 4           # direzione in cui stiamo camminando (all'indietro)
+        mode = rng.random()
+        spiral = mode < p.spiral_p
+        straight = (not spiral) and mode < p.spiral_p + p.straight_p
+        side = rng.choice((1, 3))   # verso di avvolgimento della spirale
+        run = 1
+        run_max = rng.randint(3, 7)
+        while len(path) < target:
+            x, y = path[-1]
+            turn_a, turn_b = (cur + side) % 4, (cur + 4 - side) % 4
+            if spiral:
+                # dritto fino a un ostacolo (o a fine tratto), poi sempre dallo stesso lato
+                cand = [cur, turn_a, turn_b] if run < run_max else [turn_a, cur, turn_b]
+            elif straight:
+                cand = [cur, turn_a, turn_b] if rng.random() > 0.06 else [turn_a, turn_b, cur]
+            else:
+                # cammino libero: curva a caso, e comunque dopo un tratto dritto troppo lungo
+                if rng.random() < p.turn_p or run >= run_max + 2:
+                    t = [turn_a, turn_b]
+                    rng.shuffle(t)
+                    cand = t + [cur]
+                else:
+                    cand = [cur, turn_a, turn_b] if rng.random() < 0.5 else [cur, turn_b, turn_a]
+            moved = False
+            for nd in cand:
+                n = (x + DIRS[nd][0], y + DIRS[nd][1])
+                if is_free(n) and n not in used:
+                    if nd != cur:
+                        run = 1
+                        if spiral:
+                            run_max = max(2, run_max - rng.randint(0, 1))
+                    else:
+                        run += 1
+                    cur = nd
+                    path.append(n)
+                    used.add(n)
+                    moved = True
+                    break
+            if not moved:
+                break
+        return list(reversed(path))  # coda -> punta
+
+    while free_cells:
+        cands = []
+        for (c, d) in frontier():
+            prev = (c[0] - DIRS[d][0], c[1] - DIRS[d][1])
+            body = is_free(prev)
+            hit = {owner[r] for r in ray(c, d, w, h) if r in owner}
+            dep = 1 + max((depth[i] for i in hit), default=0)
+            cands.append((c, d, body, dep, len(hit)))
+        with_body = [t for t in cands if t[2]]
+        pool = with_body or cands
+
+        def score(t):
+            _, _, _, dep, nhit = t
+            s = rng.random() * 1.5
+            if dep == 1:
+                s -= p.hard * 1.6
+            return s + p.hard * (min(dep, 10) * 0.35 + min(nhit, 6) * 0.25)
+        c, d, body, dep, _ = max(pool, key=score)
+        cells = walk(c, d, pick_length(p, rng)) if body else [c]
+        idx = len(arrows)
+        for cell in cells:
+            owner[cell] = idx
+            free_cells.discard(cell)
+        arrows.append([cells, head_dir(cells, d)])
+        depth.append(dep)
+
+    merge_singles(arrows, w, h, rng)
+    return [(cells, d) for cells, d in arrows if cells]
+
+
+def merge_singles(arrows, w, h, rng):
+    """Le frecce da 1 casella si attaccano alla coda di una freccia vicina, se l'ordine di uscita
+    resta valido: chi ha quella cella sulla propria strada deve uscire dopo la freccia che la prende."""
+    owner = {}
+    for i, (cells, _) in enumerate(arrows):
+        for c in cells:
+            owner[c] = i
+    ray_of = {}  # cella -> frecce che la hanno sulla strada
+    for i, (cells, d) in enumerate(arrows):
+        for r in ray(cells[-1], d, w, h):
+            ray_of.setdefault(r, []).append(i)
+    for i, (cells, d) in enumerate(arrows):
+        if len(cells) != 1:
+            continue
+        s = cells[0]
+        opts = []
+        for dx, dy in DIRS:
+            n = (s[0] + dx, s[1] + dy)
+            j = owner.get(n)
+            if j is None or j == i or not arrows[j][0] or arrows[j][0][0] != n:
+                continue
+            if len(arrows[j][0]) == 1 and (dx, dy) != DIRS[arrows[j][1]]:
+                continue  # unendo due frecce da 1 la punta cambierebbe verso
+            # (se s sta sulla strada di j stessa, j compare in ray_of[s] e viene esclusa: si bloccherebbe da sola)
+            if all(k > j for k in ray_of.get(s, ()) if k != i):
+                opts.append(j)
+        if opts:
+            j = rng.choice(opts)
+            arrows[j][0].insert(0, s)
+            owner[s] = j
+            arrows[i][0] = []
+            # la strada della freccia tolta non conta piu'
+            for r in ray(s, d, w, h):
+                lst = ray_of.get(r)
+                if lst and i in lst:
+                    lst.remove(i)
+
+
+# ---------------------------------------------------------------- piano dei livelli
 def lerp(a, b, t):
     return a + (b - a) * max(0.0, min(1.0, t))
 
 
-def plan_for(lid):
-    """Griglia, parametri delle frecce e quota massima di frecce libere in partenza."""
-    boss = lid % 10 == 0
+def grid_for(lid):
     if lid <= 2:
-        w, h = 6, 8  # primi livelli: per imparare
-    elif lid <= 10:
+        return 6, 8
+    if lid <= 10:
         t = (lid - 3) / 7
-        w, h = round(lerp(7, 9, t)), round(lerp(10, 13, t))
-    elif lid <= 30:
-        t = (lid - 11) / 19
-        w, h = round(lerp(10, 12, t)), round(lerp(14, 17, t))
-    elif lid <= 60:
-        t = (lid - 31) / 29
-        w, h = round(lerp(13, 14, t)), round(lerp(18, 21, t))
-    else:
-        t = (lid - 61) / 39
-        w, h = round(lerp(15, 16, t)), round(lerp(22, 26, t))
+        return round(lerp(8, 12, t)), round(lerp(11, 16, t))
+    if lid <= 40:
+        t = (lid - 11) / 29
+        return round(lerp(13, 26, t)), round(lerp(18, 36, t))
+    t = (lid - 41) / 209
+    return round(lerp(26, 28, t)), round(lerp(36, 40, t))
 
-    t = (lid - 1) / 99
-    max_len = round(lerp(3, 7, t ** 0.7))
-    min_len = 2 if lid < 30 else 3
-    turn_p = 0.0 if lid <= 3 else (0.3 if lid <= 10 else round(lerp(0.4, 0.6, t), 2))
-    zigzag = lid > 10
-    greed = round(lerp(4, 14, t ** 0.6))
-    hot = 0.4 if lid <= 3 else 0.75
-    fill_min = 1
-    target = lerp(0.5, 0.25, (lid - 1) / 29) if lid <= 30 else lerp(0.25, 0.12, (lid - 30) / 70)
+
+def params_for(lid, boss):
+    t40 = (lid - 1) / 39
+    tall = (lid - 41) / 209
+    if lid <= 40:
+        max_len = round(lerp(4, 16, t40))
+    else:
+        max_len = round(lerp(16, 30, tall))
+    p_short = lerp(0.55, 0.3, t40) if lid <= 40 else lerp(0.3, 0.22, tall)
+    turn_p = 0.0 if lid <= 2 else (lerp(0.15, 0.45, t40) if lid <= 40 else 0.45)
+    spiral_p = 0.0 if lid < 8 else (lerp(0.08, 0.25, t40) if lid <= 40 else lerp(0.25, 0.35, tall))
+    straight_p = 0.08
+    hard = 0.2 if lid <= 2 else (lerp(0.4, 1.1, t40) if lid <= 40 else lerp(1.1, 1.8, tall))
+    # quota di frecce libere all'inizio a cui puntare
+    target = lerp(0.45, 0.16, t40) if lid <= 40 else lerp(0.16, 0.07, tall)
     if boss:
-        w, h = w + 1, h + 1
-        max_len += 2
-        min_len = max(3, min_len)
-        turn_p = min(0.7, turn_p + 0.15)
-        zigzag = True
-        greed += 4
-        target *= 0.6
-    prm = Params(max_len, turn_p, zigzag, min_len, greed, hot, edge_short=2 if lid > 3 else 1, fill_min=fill_min)
-    return w, h, prm, boss, target
+        max_len += 3
+        spiral_p += 0.05
+        hard += 0.3
+        target *= 0.7
+    return Params(max_len, p_short, turn_p, spiral_p, straight_p, hard), target
 
 
 SHAPES = {
@@ -502,57 +326,66 @@ SHAPES = {
 
 def shape_for(lid, boss):
     if boss:
-        return "square"  # i boss usano sempre la griglia piena: sono i piu' densi
+        return "sil:" + BOSS_ORDER[lid // 10 - 1]
     if lid % 3 != 0:
-        return "square"  # griglia piena a rettangolo: la piu' densa di frecce
-    group = "early" if lid <= 10 else ("mid" if lid <= 45 else "late")
+        return "square"
+    group = "early" if lid <= 10 else ("mid" if lid <= 60 else "late")
     lst = SHAPES[group]
     return lst[(lid * 7) % len(lst)]
 
 
-def build_levels(seed=20261110):
-    rng = random.Random(seed)
+def build_level(lid, rng):
+    boss = lid % 10 == 0
+    w, h = grid_for(lid)
+    shape = shape_for(lid, boss)
+    if shape != "square":
+        w, h = w + 2, h + 3  # le forme hanno meno caselle: griglia un po' piu' grande
+    mask = shape_mask(shape, w, h)
+    prm, target = params_for(lid, boss)
+    best = None
+    tries = 10 if boss else 6
+    for k in range(tries):
+        # ogni tentativo varia un po' la "cattiveria" per avvicinarsi alla quota di libere
+        p = Params(prm.max_len, prm.p_short, prm.turn_p, prm.spiral_p, prm.straight_p,
+                   prm.hard * lerp(0.0 if lid <= 20 else 0.5, 1.3, k / max(1, tries - 1)))
+        arrows = generate(mask, w, h, p, rng)
+        ok, waves, free = solve(arrows, w, h)
+        if not ok or sum(len(c) for c, _ in arrows) != len(mask):
+            continue
+        n = len(arrows)
+        share = free / n
+        singles = sum(1 for c, _ in arrows if len(c) == 1) / n
+        key = abs(share - target) * 10 + singles * 6 - min(waves, 40) * 0.03
+        if best is None or key < best[0]:
+            best = (key, arrows, waves, share)
+    if best is None:
+        raise SystemExit(f"nessun candidato valido per il livello {lid}")
+    _, arrows, waves, share = best
+    arrows = list(arrows)
+    rng.shuffle(arrows)
+    n = len(arrows)
+    avg = sum(len(c) for c, _ in arrows) / n
+    diff = waves * 0.6 + (1 - share) * 6 + avg * 0.8 + n * 0.02
+    lv = {
+        "id": lid, "shape": shape, "w": w, "h": h, "boss": boss,
+        "arrows": [{"c": [v for cell in cells for v in cell], "d": head_dir(cells, d)} for cells, d in arrows],
+        "difficulty": round(diff, 2),
+    }
+    if boss:
+        lv["name"] = SIL[shape[4:]][0]
+        lv["name_en"] = SIL[shape[4:]][1]
+        # tempo proporzionato alle frecce: circa 1 s l'una, minimo 45 s, a passi di 5
+        lv["time"] = int(max(45, round(n * 1.0 / 5) * 5))
+    return lv
+
+
+def build_levels():
+    rng = random.Random(SEED)
     raw = []
     for lid in range(1, LEVEL_COUNT + 1):
-        w, h, prm, boss, target = plan_for(lid)
-        shape = shape_for(lid, boss)
-        if shape != "square":
-            w, h = w + 2, h + 3  # le forme hanno meno caselle: griglia un po' piu' grande
-        mask = shape_mask(shape, w, h)
-        cands = []
-        for _ in range(24 if boss else 14):
-            arrows = generate_dense(mask, w, h, prm, rng)
-            covered = sum(len(c) for c, _ in arrows)
-            if covered < len(mask) * 0.92:
-                continue
-            ok, waves, free = solve(arrows, w, h)
-            if not ok:
-                continue
-            share = free / len(arrows)
-            singles = sum(1 for c, _ in arrows if len(c) == 1) / len(arrows)
-            if singles > 0.22:
-                continue
-            # piu' vicino alla quota di libere, poi piu' ondate
-            cov = covered / len(mask)
-            key = (max(0.0, share - target) * 10 + abs(share - target) + (1 - cov) * 2 - min(waves, 20) * 0.04,)
-            cands.append((key, arrows, waves, share))
-        if not cands:
-            raise SystemExit(f"nessun candidato per il livello {lid}")
-        cands.sort(key=lambda t: t[0])
-        _, arrows, waves, share = cands[0]
-        n = len(arrows)
-        avg = sum(len(c) for c, _ in arrows) / n
-        diff = waves * 1.0 + (1 - share) * 4 + avg * 0.8
-        lv = {
-            "id": lid, "shape": shape, "w": w, "h": h, "boss": boss,
-            "arrows": [{"c": [v for cell in cells for v in cell], "d": head_dir(cells, d)} for cells, d in arrows],
-            "difficulty": round(diff, 2),
-        }
-        if boss:
-            # tempo proporzionato alle frecce: circa 0,9 s l'una, minimo 45 s, a passi di 5
-            lv["time"] = int(max(45, round(n * 0.9 / 5) * 5))
-        raw.append(lv)
-        print(f"  generato {lid}", file=sys.stderr, end="\r")
+        raw.append(build_level(lid, rng))
+        print(f"  generato {lid}/{LEVEL_COUNT}", file=sys.stderr, end="\r", flush=True)
+    print(file=sys.stderr)
     # ogni blocco di 10 (escluso il boss) in ordine di difficolta' crescente
     out = []
     for b in range(0, LEVEL_COUNT, 10):
@@ -565,32 +398,22 @@ def build_levels(seed=20261110):
     return out
 
 
-def preview(lv):
-    g = [["." for _ in range(lv["w"])] for _ in range(lv["h"])]
-    for i, a in enumerate(lv["arrows"]):
-        c = a["c"]
-        cells = [(c[k], c[k + 1]) for k in range(0, len(c), 2)]
-        for (x, y) in cells[:-1]:
-            g[y][x] = "abcdefghijklmnopqrstuvwxyz"[i % 26]
-        hx, hy = cells[-1]
-        g[hy][hx] = "^>v<"[a["d"]]
-    return "\n".join(" ".join(r) for r in g)
-
-
 def main():
     levels = build_levels()
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out = os.path.join(root, "app", "src", "main", "assets", "levels.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w") as f:
-        json.dump({"version": 4, "levels": levels}, f, separators=(",", ":"))
+        json.dump({"version": FORMAT_VERSION, "levels": levels}, f, separators=(",", ":"))
     for lv in levels:
-        lens = [len(a["c"]) // 2 for a in lv["arrows"]]
         cells = [([(a["c"][k], a["c"][k + 1]) for k in range(0, len(a["c"]), 2)], a["d"]) for a in lv["arrows"]]
-        _, waves, free = solve(cells, lv["w"], lv["h"])
-        tag = f" BOSS {lv['time']}s" if lv["boss"] else ""
-        print(f"{lv['id']:>3} {lv['shape']:<9} {lv['w']}x{lv['h']:<3} frecce={len(lens):>2} "
-              f"lung.max={max(lens)} media={sum(lens)/len(lens):.1f} libere={free/len(lens):.0%} ondate={waves} diff={lv['difficulty']}{tag}")
+        ok, waves, free = solve(cells, lv["w"], lv["h"])
+        assert ok, f"livello {lv['id']} non risolvibile"
+        lens = [len(c) for c, _ in cells]
+        tag = f" BOSS {lv.get('name', '')} {lv['time']}s" if lv["boss"] else ""
+        print(f"{lv['id']:>3} {lv['shape']:<14} {lv['w']}x{lv['h']:<3} frecce={len(lens):>3} "
+              f"lung.max={max(lens):>2} media={sum(lens)/len(lens):.1f} singole={lens.count(1):>2} "
+              f"libere={free/len(lens):.0%} ondate={waves:>2} diff={lv['difficulty']}{tag}")
     print("scritto", out, os.path.getsize(out), "byte")
 
 

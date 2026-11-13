@@ -7,7 +7,7 @@ Va aggiornato a ogni nuova versione.
 - **App:** Outflow – Arrow Game (nome scelto il 13/11/2026, uguale in Play Console e nel gioco; marchio "Outflow" da verificare prima della pubblicazione)
 - **ID app:** `com.airis.outflow` (definitivo, non si può più cambiare dopo la pubblicazione)
 - **Repository:** `lelux95/outflow-android` (privato)
-- **Versione attuale:** 0.5.1-alpha (versionCode 6), 13 novembre 2026
+- **Versione attuale:** 0.6.0-alpha (versionCode 7), 13 novembre 2026
 - **Ultimo aggiornamento di questo file:** 13 novembre 2026 (fase 0.6 avviata: punto 1 dell'ordine di lavoro)
 - **Tester principale:** il padre di Daniele (giocatore abituale di questo genere di giochi)
 - **Documento di progetto iniziale:** artifact "Outflow – Documento di progetto" su claude.ai
@@ -38,9 +38,13 @@ Va aggiornato a ogni nuova versione.
 - **Modalità Tester:** visibile solo se `ALPHA = true` in `app/build.gradle.kts`. Per lo Store va messo `false`.
 
 ### Strumenti (cartella `tools/`)
-- `generate_levels.py` → genera i 100 livelli in `app/src/main/assets/levels.json`.
+- `generate_levels.py` → genera i **250 livelli** in `app/src/main/assets/levels.json` (metodo "a buccia di
+  cipolla": le frecce nascono nell'ordine in cui si tolgono, griglia piena e risolvibile per costruzione).
   Ogni livello è verificato dal risolutore (tutti risolvibili, nessuna sovrapposizione).
   Il seme è fisso: rilanciarlo produce gli stessi livelli.
+- `silhouettes.py` → le 25 sagome dei boss (forme geometriche semplici, disegnate da noi).
+- `preview.py` → anteprime PNG di sagome e livelli, solo per controllo.
+- Python 3.12 installato sul PC di Daniele (13/11/2026): `python tools/generate_levels.py`.
 - `make_sounds.py` → genera i 5 suoni WAV in `app/src/main/res/raw/` (sintetizzati, senza diritti di terzi).
 
 ### File principali
@@ -59,10 +63,10 @@ Va aggiornato a ogni nuova versione.
 | `Sounds.kt` | Effetti sonori |
 
 ### Salvataggio
-- `SharedPreferences` nel file `outflow_v4`. Al cambio di file (nuovi livelli) si azzerano stelle e monete
+- `SharedPreferences` nel file `outflow_v5` (dalla 0.6.0). Al cambio di file (nuovi livelli) si azzerano stelle e monete
   ma si conservano lingua, nome, suoni, vibrazione e Tester.
 - Backup Android attivo solo su quel file (`res/xml/backup_rules.xml`, `data_extraction_rules.xml`).
-- **Se i livelli cambiano di nuovo**, passare a `outflow_v5` e aggiornare le regole di backup.
+- **Se i livelli cambiano di nuovo**, passare a `outflow_v6` e aggiornare le regole di backup.
 
 ---
 
@@ -71,7 +75,8 @@ Va aggiornato a ogni nuova versione.
 - Ogni freccia occupa da 1 a più caselle, dritta, a L o a zig-zag; la punta indica dove esce.
 - Tocchi un punto qualsiasi della freccia: esce se la strada davanti alla punta è libera fino al bordo,
   e scivola via seguendo il proprio percorso ("uscita a serpente").
-- Se è bloccata: la freccia trema in rosso, **la freccia che la blocca lampeggia**, si perde 1 tentativo.
+- Se è bloccata: la freccia trema, **la freccia che la blocca lampeggia**, si perde 1 tentativo e
+  **la freccia sbagliata resta rossa** finché non viene liberata (dalla 0.6.0).
 - **3 tentativi per livello** (cuori). A zero: tentativo extra (vedi economia) o si ricomincia.
 - Nessun quadrato sotto le frecce (deciso: rendeva il gioco troppo facile).
 - Zoom con due dita, trascinamento con un dito; pulsante "Vista intera" quando ingrandito.
@@ -85,24 +90,27 @@ Va aggiornato a ogni nuova versione.
 | 3 | livello perso |
 
 ### Livelli
-- **100 livelli**, sbloccati in sequenza (tutti aperti in modalità Tester).
-- Griglie piene al 100% (metodo "riempi e ripara"), rettangolari, più alte che larghe.
+- **250 livelli** (dalla 0.6.0), sbloccati in sequenza (tutti aperti in modalità Tester).
+- Griglie piene al 100%, più alte che larghe: da 6×8 (liv. 1–2) a **26×36 al livello 40**, poi fino a 28×40.
+- Frecce di lunghezza molto varia (da 2 fino a 30 caselle), curve, U e **spirali**.
+- Sotto il titolo la fascia di difficoltà: Facile / Medio / Difficile / Esperto (dal valore `difficulty`).
 - Circa 2 livelli su 3 sono rettangoli pieni; gli altri hanno forme (rombo, cerchio, croce, clessidra,
   triangolo, stella, freccia) con griglia un po' più grande.
 - Tutorial di una riga nei livelli 1 e 2.
 
-| Livello | Griglia | Frecce |
-| --- | --- | --- |
-| 1 | 6×8 | 20 |
-| 10 (boss) | 10×14 | 39 |
-| 30 (boss) | 13×18 | 67 |
-| 60 (boss) | 15×22 | 93 |
-| 100 (boss) | 17×27 | 116 |
+| Livello | Griglia | Frecce | Libere all'inizio |
+| --- | --- | --- | --- |
+| 1 | 6×8 | 14 | 43% |
+| 10 (boss Goccia) | 14×19 | 39 | 21% |
+| 41 | 26×36 | 176 | 16% |
+| 100 (boss Corona) | 29×40 | circa 110 | 10% |
+| 250 (boss Barca a vela) | 30×43 | 79 | 8% |
 
-### Boss (livelli 10, 20, … 100)
+### Boss (livelli 10, 20, … 250)
 - Bordo viola e scritta BOSS nella griglia dei livelli; schermata di presentazione prima di iniziare.
-- Sempre griglia piena, la più difficile del suo blocco di 10.
-- **A tempo**: circa 0,9 s per freccia, minimo 45 s (da 45 s al liv. 10 a 1:45 al liv. 100).
+- **Sagoma** (dalla 0.6.0): ogni boss disegna un'immagine (goccia, mela, abete, fungo, fiamma, razzo, gatto…),
+  con il nome mostrato nella presentazione e sotto il titolo.
+- **A tempo**: circa 1 s per freccia, minimo 45 s, a passi di 5 s.
   Ultimi 10 secondi in rosso. Restano anche i 3 tentativi ("è pur sempre un boss").
 - Monete ×1,5.
 
@@ -135,7 +143,7 @@ Va aggiornato a ogni nuova versione.
 | --- | --- |
 | Potenziamenti | 3 aiuti 60 · tentativo di scorta 70 · +15 s di scorta 80 · 2 Rivela 100 |
 | Temi | Classico e Scuro inclusi · Pastello 150 · Oceano 250 · Tramonto 400 · Neon 600 · Oro (liv. 50) · Maestro (liv. 100) |
-| Frecce (stili) | Classica inclusa · Marker 200 · Gesso 300 · Neon 350 · Pixel 400 · Binario 450 |
+| Frecce (stili) | **Linea** (predefinita, tinta unica) e **Facile da vedere** (a colori) incluse · Marker 200 · Gesso 300 · Neon 350 · Pixel 400 · Binario 450 |
 | Scie | Nessuna inclusa · Scintille 150 · Coriandoli 200 · Stelline 250 · Fumo 300 · Arcobaleno 350 |
 
 Stili e scie hanno un'anteprima toccabile nel negozio. Tema, stile e scia si combinano liberamente.
@@ -322,6 +330,21 @@ nella griglia livelli. Possibile premio monete extra per S.
   **zone colorate** dei livelli-immagine (8.7), così si riscrive e si cambia salvataggio una volta sola.
 - I punteggi delle build con modalità Tester attiva **non vanno inviati** alle classifiche.
 
+### 8.10 Analisi degli screen dei competitor e decisioni (13/11/2026)
+Screen in `screen concorrenza` (livelli 8, 10, 13 "Difficile" di un altro gioco: solo riferimento, non si copia).
+- Griglie circa **26×36** già dal livello 8; frecce di lunghezza molto varia (tante da 2–4, alcune da 15–30
+  che attraversano la figura), **spirali** e U; **un solo colore**, linee sottili.
+- Il "livello-immagine" è una **sagoma** monocolore (es. una fiamma), non zone colorate.
+- Frecce gialle evidenziate nel loro livello 13: funzione del loro gioco, **per ora ignorata**.
+
+Decisioni:
+- **250 livelli.** Griglie che crescono fino a **26×36 al livello 40**, poi lentamente fino a 28×40.
+- **Boss = sagome** disegnate da noi (una diversa per ogni boss).
+- **Stile monocolore sottile ("Linea") predefinito**; lo stile a colori attuale diventa
+  **"Facile da vedere"**, gratuito nel negozio.
+- Il generatore costruisce i livelli nell'ordine di soluzione (dall'esterno verso l'interno): griglia
+  piena al 100%, risolvibile per costruzione, frecce lunghe senza doverle spezzare.
+
 ## 10. Ordine di lavoro (fase 0.6, rivisto e approvato il 13/11/2026)
 
 1. Target API 36, AGP aggiornato, tasto indietro compatibile con Android 16, chiave di upload,
@@ -346,3 +369,4 @@ nella griglia livelli. Possibile premio monete extra per S.
 | 0.4.0 | 10/11/2026 | Griglie piene, stili e scie, nome giocatore, profilo, vista intera |
 | 0.5.0 | 10/11/2026 | Negozio a sezioni, sfida del giorno, trofei, condivisione, backup |
 | 0.5.1 | 13/11/2026 | Target API 36, AGP 8.11.1, tasto indietro per Android 16, bundle .aab con chiave di upload |
+| 0.6.0 | 13/11/2026 | 250 livelli nuovi (frecce lunghe, spirali, griglie fino a 28×40), boss a sagoma, stile Linea monocolore + Facile da vedere, freccia sbagliata segnata, fascia di difficoltà, salvataggio `outflow_v5` |

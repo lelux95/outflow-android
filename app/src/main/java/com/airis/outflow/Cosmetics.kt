@@ -1,8 +1,13 @@
 package com.airis.outflow
 
-/** Stili di disegno delle frecce, acquistabili nel negozio. */
+/**
+ * Stili di disegno delle frecce, acquistabili nel negozio.
+ * Tutti gli stili sono a tinta unica (piu' difficile: bisogna seguire la linea), tranne
+ * "Facile da vedere", che da' un colore diverso a ogni freccia.
+ */
 enum class ArrowStyle(val id: String, val price: Int, val nameEn: String, val nameIt: String, val descEn: String, val descIt: String) {
-    CLASSIC("classic", 0, "Classic", "Classica", "Clean rounded line", "Linea pulita e arrotondata"),
+    LINE("line", 0, "Line", "Linea", "Thin single-colour line: the real challenge", "Linea sottile a tinta unica: la vera sfida"),
+    EASY("easy", 0, "Easy to see", "Facile da vedere", "Every arrow in its own colour, bolder line", "Ogni freccia del suo colore, tratto più marcato"),
     MARKER("marker", 200, "Marker", "Marker", "Bold felt-tip stroke", "Tratto spesso da pennarello"),
     CHALK("chalk", 300, "Chalk", "Gesso", "Rough hand-drawn line", "Tratto ruvido, disegnato a mano"),
     NEON("neon", 350, "Neon", "Neon", "Glowing light tubes", "Tubi di luce con alone"),
@@ -12,8 +17,11 @@ enum class ArrowStyle(val id: String, val price: Int, val nameEn: String, val na
     val label: String get() = if (S.lang == "it") nameIt else nameEn
     val desc: String get() = if (S.lang == "it") descIt else descEn
 
+    /** true = un colore per freccia; false = tutte dello stesso colore. */
+    val colorful: Boolean get() = this == EASY
+
     companion object {
-        fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: CLASSIC
+        fun byId(id: String?) = entries.firstOrNull { it.id == id } ?: LINE
     }
 }
 
