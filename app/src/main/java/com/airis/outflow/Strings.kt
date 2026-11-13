@@ -5,7 +5,7 @@ object S {
     var lang = "en"
 
     private val enMap = mapOf(
-        "subtitle" to "Arrow Puzzle",
+        "subtitle" to "Arrow Game",
         "play" to "Play",
         "continue_lv" to "Continue · Level %d",
         "settings" to "Settings",
@@ -127,7 +127,7 @@ object S {
     )
 
     private val itMap = mapOf(
-        "subtitle" to "Arrow Puzzle",
+        "subtitle" to "Arrow Game",
         "play" to "Gioca",
         "continue_lv" to "Continua · Livello %d",
         "settings" to "Impostazioni",

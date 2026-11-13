@@ -1,10 +1,10 @@
-# Outflow – Arrow Puzzle · Registro di progetto
+# Outflow – Arrow Game · Registro di progetto
 
 Documento di riferimento per chi riprende il lavoro (persona o nuova chat con Claude).
 Contiene **tutte le decisioni prese**, lo stato attuale e le cose da fare.
 Va aggiornato a ogni nuova versione.
 
-- **App:** Outflow – Arrow Puzzle (nome di lavoro, sembra libero; marchio da verificare prima della pubblicazione)
+- **App:** Outflow – Arrow Game (nome scelto il 13/11/2026, uguale in Play Console e nel gioco; marchio "Outflow" da verificare prima della pubblicazione)
 - **ID app:** `com.airis.outflow` (definitivo, non si può più cambiare dopo la pubblicazione)
 - **Repository:** `lelux95/outflow-android` (privato)
 - **Versione attuale:** 0.5.1-alpha (versionCode 6), 13 novembre 2026
@@ -293,7 +293,7 @@ nella griglia livelli. Possibile premio monete extra per S.
 | Voce | Stato | Note |
 | --- | --- | --- |
 | Account sviluppatore | ✅ attivo | Intestato alla moglie di Daniele, personale |
-| App in Play Console | ✅ creata | `com.airis.outflow`, nome in Console "Outflow - Arrow Game" (da allineare con "Arrow Puzzle"?) |
+| App in Play Console | ✅ creata | `com.airis.outflow`, nome "Outflow - Arrow Game" |
 | Test interno | ✅ 0.5.1 (vc 6) caricata | Play App Signing attivo; avviso "file di deoffuscamento" ignorato (R8 non usato) |
 | Dichiarazione commerciante (DSA) | da fare | "Non commerciante" finché senza pubblicità |
 | Target API 36 (Android 16) | fatto in 0.5.1, da verificare sul telefono | AGP 8.11.1, Gradle 8.13, tasto indietro con OnBackInvokedCallback |

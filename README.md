@@ -1,4 +1,4 @@
-# Outflow – Arrow Puzzle
+# Outflow – Arrow Game
 
 > Decisioni, regole, economia, stato e prossimi passi: vedi **[PROGETTO.md](PROGETTO.md)**.
 >
