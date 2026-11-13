@@ -8,6 +8,7 @@ Va aggiornato a ogni nuova versione.
 - **ID app:** `com.airis.outflow` (definitivo, non si può più cambiare dopo la pubblicazione)
 - **Repository:** `lelux95/outflow-android` (privato)
 - **Versione attuale:** 0.5.0-alpha (versionCode 5), 10 novembre 2026
+- **Ultimo aggiornamento di questo file:** 13 novembre 2026 (brief della fase 0.6 → sezione 8)
 - **Tester principale:** il padre di Daniele (giocatore abituale di questo genere di giochi)
 - **Documento di progetto iniziale:** artifact "Outflow – Documento di progetto" su claude.ai
 
@@ -153,7 +154,7 @@ Primo livello, 10 / 50 / 100 livelli, primo boss, 5 boss, boss in metà tempo, 3
 
 - **Account Play Console:** creato su un account Google nuovo, **intestato alla moglie di Daniele**
   (futura P.IVA forfettaria). Daniele entrerà come amministratore tramite "Utenti e autorizzazioni".
-  Stato al 10/11/2026: **in attesa della verifica dei documenti**.
+  Stato al 13/11/2026: **account attivo** (documenti verificati). Checklist di pubblicazione → sezione 9.
 - **Tipo di account:** personale per ora; organizzazione quando ci sarà la P.IVA (richiede D-U-N-S).
 - **Commerciante (DSA UE):** dichiarare **"non commerciante"** finché l'app è gratuita e senza pubblicità;
   passare a "commerciante" quando si attivano AdMob o acquisti (recapiti dell'attività, non di casa).
@@ -167,7 +168,10 @@ Primo livello, 10 / 50 / 100 livelli, primo boss, 5 boss, boss in metà tempo, 3
 
 ## 6. Da fare (in ordine)
 
-1. **Play Giochi** (appena l'account è verificato): creare l'app `com.airis.outflow` in Play Console,
+> Aggiornato il 13/11/2026: l'ordine di lavoro attuale è nella sezione 8 (fase 0.6) e nella
+> checklist di pubblicazione (sezione 9). L'elenco qui sotto resta valido come contenuto.
+
+1. **Play Giochi** (l'account è attivo): creare l'app `com.airis.outflow` in Play Console,
    attivare i servizi Play Giochi, poi integrare:
    - classifiche: stelle totali, tempo sui boss, **sfida del giorno** (la più importante);
    - trofei Google (riprendere i 14 esistenti);
@@ -189,6 +193,119 @@ Primo livello, 10 / 50 / 100 livelli, primo boss, 5 boss, boss in metà tempo, 3
 - Curva di difficoltà e tempi dei boss (con i dati della modalità Tester del padre).
 - Equilibrio monete/prezzi (con 3 tentativi si guadagnano meno stelle).
 - Livelli con forme: hanno meno frecce dei rettangoli; eventualmente renderli più rari o più grandi.
+
+---
+
+## 8. Brief del 13/11/2026 – fase 0.6 (DA FARE)
+
+Richieste di Daniele dopo lo studio dei competitor. Le proposte tecniche sono di Claude e
+**vanno confermate** prima dello sviluppo dove indicato.
+
+### 8.1 Tempo di risoluzione per ogni livello
+- Ogni livello registra il tempo impiegato (già misurato internamente, va salvato e mostrato).
+- Salvare **miglior tempo** e **ultimo tempo** per livello; mostrarli a fine livello e nella griglia livelli.
+- Il tempo serve al punteggio (8.2) e alle classifiche (8.4).
+
+### 8.2 Valutazione a lettere S-A-B-C-D-E-F
+Ogni livello concluso riceve un voto in base a **tempo, aiuti usati, errori**.
+Proposta di calcolo (da confermare e tarare con i test):
+- Si parte da 100 punti.
+- **Tempo:** tempo di riferimento = circa 1,2 s per freccia (minimo 20 s). Entro il riferimento nessuna
+  penalità; oltre, −1 punto ogni 3% in più, massimo −40.
+- **Errori:** −15 per errore.
+- **Aiuti:** −10 per Aiuto, −15 per Rivela, −20 per tentativo o tempo extra comprato.
+
+| Punti | Voto |
+| --- | --- |
+| 95–100 | S |
+| 85–94 | A |
+| 70–84 | B |
+| 55–69 | C |
+| 40–54 | D |
+| 25–39 | E |
+| 0–24 | F |
+
+Da decidere: se il voto **sostituisce** le stelle o le **affianca** (proposta: affianca; le stelle
+restano per sbloccare livelli e monete, il voto è il punteggio "competitivo"). Mostrare il miglior voto
+nella griglia livelli. Possibile premio monete extra per S.
+
+### 8.3 Frecce più lunghe (più difficoltà)
+- Dai competitor: le frecce sono **molto più lunghe** e attraversano gran parte della figura.
+- Proposta: lunghezza tipica 6–15 caselle (oggi 2–9), molte curve, frecce che si avvolgono
+  attorno ad altre. Meno frecce ma ognuna blocca molte traiettorie.
+- Il generatore "riempi e ripara" va adattato: cammini più lunghi e la riparazione deve preferire
+  "girare" a "spezzare" (spezzare accorcia le frecce).
+- I 100 livelli andranno rigenerati → **nuovo file di salvataggio `outflow_v5`** (progressi azzerati,
+  impostazioni conservate) e aggiornamento delle regole di backup.
+
+### 8.4 Eventi con classifiche dedicate (da studiare insieme)
+- Eventi a tempo (es. un weekend o una settimana) con un pacchetto di livelli a tema (vedi 8.7).
+- Ogni evento ha la **sua classifica** in Play Giochi (somma dei punteggi o tempo totale) e premi
+  (monete, temi o stili esclusivi dell'evento).
+- Tecnica: i livelli degli eventi dovrebbero arrivare **senza aggiornare l'app** (file scaricato da un
+  server o da Firebase Remote Config/hosting). Da decidere dove ospitarli.
+- Le classifiche Play Giochi si possono creare in anticipo e mostrare solo durante l'evento.
+
+### 8.5 Effetti durante la partita (combo)
+- **Combo:** frecce liberate correttamente una dopo l'altra entro un tempo breve (proposta: entro 1,5 s
+  l'una dall'altra) aumentano un contatore "×2, ×3…".
+- Soglie proposte: 5 di fila → scritta e piccoli coriandoli; 10 → fuochi d'artificio; 20 → effetto grande
+  sullo schermo. Un errore azzera la combo.
+- Eventuale bonus al punteggio (8.2) o monete per le combo lunghe: da decidere.
+
+### 8.6 Freccia sbagliata segnata in modo permanente
+- Oggi la freccia bloccata trema in rosso solo per un attimo.
+- Nuovo comportamento: dopo un errore la freccia **resta colorata in modo diverso** (es. rossa o
+  tratteggiata) finché non viene liberata, così l'errore resta visibile.
+
+### 8.7 Livelli-immagine (priorità)
+- Nei competitor il labirinto di frecce **disegna un'immagine** (es. un razzo, un segno zodiacale).
+- Daniele caricherà gli screen dei competitor in una **cartella dedicata** (in arrivo): servono come
+  riferimento, non vanno copiati.
+- Proposta tecnica: si parte da un'immagine semplice a pixel (es. 20×30) disegnata da noi, a colori;
+  ogni colore è una zona; il generatore riempie ogni zona con frecce lunghe **del colore della zona**,
+  così a griglia piena si vede il disegno. La risolvibilità resta verificata dal risolutore.
+- Base per gli **eventi a tema**: spazio, segni zodiacali, animali, feste (Natale, Halloween…).
+- Da decidere: chi disegna le immagini (Claude può crearle a pixel su richiesta) e quante per tema.
+
+### 8.8 Google Play Console attivo → Play Giochi e pubblicazione
+- Integrare **Play Games Services v2**: accesso automatico all'avvio (senza pulsante), obiettivi,
+  classifiche (stelle totali, sfida del giorno, eventi), salvataggio cloud dei progressi.
+- Serve: progetto Play Giochi in Play Console, client OAuth Android in Google Cloud con nome pacchetto
+  e **impronta SHA-1** della chiave di firma (sia quella di upload sia quella di Play App Signing),
+  account di prova abilitati.
+- I 14 trofei esistenti diventano obiettivi Play Giochi (le icone vanno preparate).
+
+---
+
+## 9. Checklist di pubblicazione su Google Play
+
+| Voce | Stato | Note |
+| --- | --- | --- |
+| Account sviluppatore | ✅ attivo | Intestato alla moglie di Daniele, personale |
+| Dichiarazione commerciante (DSA) | da fare | "Non commerciante" finché senza pubblicità |
+| **Target API 36 (Android 16)** | **da fare** | Obbligatorio per nuove app dal 31/08/2026; oggi l'app è a 35 |
+| App bundle (.aab) firmato | da fare | Play App Signing + nuova chiave di upload (non quella alpha) |
+| `ALPHA = false` | da fare | Toglie la modalità Tester |
+| Privacy policy (URL pubblico) | da fare | Obbligatoria; ospitarla su una pagina web |
+| Sicurezza dei dati (Data safety) | da fare | Oggi nessun dato raccolto; con Play Giochi e AdMob va aggiornata |
+| Classificazione contenuti (IARC) | da fare | Questionario in Play Console |
+| Pubblico di destinazione | da fare | Proposta: 13+ o "tutti" (evitare la sezione bambini) |
+| Annunci: "contiene pubblicità?" | da fare | No, per ora |
+| Scheda dello Store | da fare | Nome, descrizione breve e lunga IT/EN, icona 512 px, immagine 1024×500, almeno 2 screenshot |
+| Test chiuso | da fare | 12 tester per 14 giorni consecutivi (account personale) |
+| Play Giochi | da fare | Vedi 8.8 |
+| Marchio "Outflow" | da verificare | TMview, classi 9 e 41 |
+
+## 10. Ordine di lavoro proposto (fase 0.6)
+
+1. Target API 36 e prima build `.aab` caricata in **test interno** (sblocca le impronte SHA-1 per Play Giochi).
+2. Frecce più lunghe (8.3) e freccia sbagliata permanente (8.6) → rigenerare i livelli.
+3. Tempo, voto S-F e combo con fuochi d'artificio (8.1, 8.2, 8.5).
+4. Play Giochi: accesso, salvataggio cloud, obiettivi, classifiche.
+5. Livelli-immagine (8.7) quando arrivano gli screen di riferimento.
+6. Eventi (8.4).
+7. Materiali Store, privacy policy, test chiuso.
 
 ---
 

@@ -1,6 +1,10 @@
 # Outflow – Arrow Puzzle
 
 > Decisioni, regole, economia, stato e prossimi passi: vedi **[PROGETTO.md](PROGETTO.md)**.
+>
+> **Stato al 13/11/2026:** versione 0.5.0-alpha. Account Google Play Console attivo.
+> Prossima fase 0.6 (frecce più lunghe, voto S-F, tempo per livello, combo con fuochi d'artificio,
+> livelli-immagine, eventi con classifiche, Play Giochi, target API 36): vedi PROGETTO.md, sezioni 8–10.
 
 Puzzle casual per Android: libera tutte le frecce dalla figura. Ogni freccia esce solo
 nella direzione in cui punta e solo se la strada è libera. 10 tentativi per livello.
